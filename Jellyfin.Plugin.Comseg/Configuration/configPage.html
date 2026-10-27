@@ -139,7 +139,9 @@
                     }
                     var rows = s.Jobs.map(function (j) {
                         return '<li>' + escapeHtml(j.Name || j.Path) + ' — analyses: ' + j.Analyses
+                            + ', confirmed breaks: ' + j.Confirmed
                             + ', published breaks: ' + j.Published
+                            + (j.ItemId ? '' : ', no library item yet')
                             + (j.ProcessRunning ? ', Comskip running' : ', Comskip not running')
                             + (j.Finalizing ? ', finishing' : '')
                             + (j.LastError ? ', ' + escapeHtml(j.LastError) : '')

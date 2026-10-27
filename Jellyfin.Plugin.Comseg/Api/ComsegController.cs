@@ -69,6 +69,7 @@ public class ComsegController : ControllerBase
             Name = j.Item?.Name,
             StartedUtc = j.StartedUtc,
             Analyses = j.Tracker.Passes,
+            Confirmed = j.Tracker.Confirmed.Count,
             Published = j.Published,
             ProcessRunning = j.Process is not null && !j.Process.HasExited,
             Finalizing = j.Finalizing,
@@ -163,7 +164,10 @@ public class ComsegController : ControllerBase
         /// <summary>Gets or sets how many analyses were read.</summary>
         public int Analyses { get; set; }
 
-        /// <summary>Gets or sets how many breaks are published.</summary>
+        /// <summary>Gets or sets how many breaks the analyses agree on so far.</summary>
+        public int Confirmed { get; set; }
+
+        /// <summary>Gets or sets how many breaks are published (needs the recording's library item).</summary>
         public int Published { get; set; }
 
         /// <summary>Gets or sets a value indicating whether Comskip is running.</summary>
