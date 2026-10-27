@@ -16,7 +16,7 @@
  bool					output_incommercial = false;
  int						incommercial_frames = 1000;
  int						live_tv_retries = 6;
-+// AdNuke patch: seconds of content between background full-analysis passes in live_tv mode (0 = off).
++// Comseg patch: seconds of content between background full-analysis passes in live_tv mode (0 = off).
 +// Each pass runs BuildMasterCommList() in a forked copy of the process and writes <base>.master.edl.
 +int						live_master_interval = 0;
 +long					live_master_last_frame = 0;
