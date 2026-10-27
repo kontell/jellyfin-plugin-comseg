@@ -241,8 +241,18 @@ public sealed class RecordingWatcher : BackgroundService
         var master = job.Process.MasterEdlPath;
         if (!File.Exists(master))
         {
+            // The stock Comskip never writes this file: its live list is the
+            // plain .edl, and on most feeds it stays empty. Say so once.
+            if (job.LastError is null && DateTime.UtcNow - job.StartedUtc > TimeSpan.FromMinutes(4) && !job.Process.HasExited)
+            {
+                job.LastError = "no periodic analysis after 4 minutes; is the configured Comskip the patched build?";
+                _logger.LogWarning("Comseg: {Path}: {Problem}", job.Path, job.LastError);
+            }
+
             return;
         }
+
+        job.LastError = null;
 
         var written = File.GetLastWriteTimeUtc(master);
         if (written <= job.LastMasterWriteUtc)
