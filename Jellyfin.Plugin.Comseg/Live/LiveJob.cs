@@ -43,6 +43,9 @@ public sealed class LiveJob
     /// <summary>Gets or sets how many times the process was restarted after exiting on its own.</summary>
     public int Restarts { get; set; }
 
+    /// <summary>Gets or sets when the library was last asked to refresh the recording's folder.</summary>
+    public DateTime LastRefreshRequestUtc { get; set; }
+
     /// <summary>Gets or sets a value indicating whether the recording ended and the final pass is running.</summary>
     public bool Finalizing { get; set; }
 

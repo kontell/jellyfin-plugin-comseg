@@ -12,6 +12,8 @@ using Jellyfin.Plugin.Comseg.Segments;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.LiveTv;
+using MediaBrowser.Controller.Providers;
+using MediaBrowser.Model.IO;
 using MediaBrowser.Model.LiveTv;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -34,6 +36,8 @@ public sealed class RecordingWatcher : BackgroundService
     private readonly ILiveTvManager _liveTv;
     private readonly IRecordingsManager _recordings;
     private readonly ILibraryManager _library;
+    private readonly IProviderManager _providers;
+    private readonly IFileSystem _fileSystem;
     private readonly ComskipRunner _runner;
     private readonly CompletedPass _pass;
     private readonly SegmentStore _store;
@@ -47,6 +51,8 @@ public sealed class RecordingWatcher : BackgroundService
     /// <param name="liveTv">The Live TV manager.</param>
     /// <param name="recordings">The recordings manager.</param>
     /// <param name="library">The library manager.</param>
+    /// <param name="providers">The provider manager, for library refreshes.</param>
+    /// <param name="fileSystem">The file system.</param>
     /// <param name="runner">The Comskip runner.</param>
     /// <param name="pass">The full-pass runner.</param>
     /// <param name="store">The segment store.</param>
@@ -57,6 +63,8 @@ public sealed class RecordingWatcher : BackgroundService
         ILiveTvManager liveTv,
         IRecordingsManager recordings,
         ILibraryManager library,
+        IProviderManager providers,
+        IFileSystem fileSystem,
         ComskipRunner runner,
         CompletedPass pass,
         SegmentStore store,
@@ -67,6 +75,8 @@ public sealed class RecordingWatcher : BackgroundService
         _liveTv = liveTv;
         _recordings = recordings;
         _library = library;
+        _providers = providers;
+        _fileSystem = fileSystem;
         _runner = runner;
         _pass = pass;
         _store = store;
@@ -240,6 +250,11 @@ public sealed class RecordingWatcher : BackgroundService
         if (job.Item is null)
         {
             job.Item = _library.FindByPath(job.Path, false);
+            if (job.Item is null)
+            {
+                RequestLibraryRefresh(job);
+            }
+
             if (job.Item is not null)
             {
                 _registry.TryEnter(job.Item.Id);
@@ -281,6 +296,42 @@ public sealed class RecordingWatcher : BackgroundService
             job.Published = job.Tracker.Confirmed.Count;
             await _store.PublishAsync(job.Item, job.Tracker.Confirmed).ConfigureAwait(false);
         }
+    }
+
+    /// <summary>
+    /// Jellyfin refreshes a new recording's folder only when a library item for a
+    /// parent folder already exists (a series folder from an earlier recording);
+    /// a first recording into a new folder waits for the realtime monitor or the
+    /// next scan. Ask the owning library root to validate the new paths instead,
+    /// the same targeted refresh Jellyfin runs when it can.
+    /// </summary>
+    private void RequestLibraryRefresh(LiveJob job)
+    {
+        var now = DateTime.UtcNow;
+        if (now - job.LastRefreshRequestUtc < TimeSpan.FromSeconds(60))
+        {
+            return;
+        }
+
+        job.LastRefreshRequestUtc = now;
+        var folder = _library.GetVirtualFolders()
+            .FirstOrDefault(v => v.Locations is not null && v.Locations.Any(l => RecordingPaths.IsUnder(job.Path, new[] { l })));
+        if (folder is null || !Guid.TryParse(folder.ItemId, out var rootId))
+        {
+            _logger.LogWarning("Comseg: {Path} is in no library; its breaks cannot be stored until it is", job.Path);
+            return;
+        }
+
+        var dir = Path.GetDirectoryName(job.Path) ?? string.Empty;
+        var parent = Path.GetDirectoryName(dir) ?? string.Empty;
+        _logger.LogInformation("Comseg: asking library {Library} to pick up {Path}", folder.Name, job.Path);
+        _providers.QueueRefresh(
+            rootId,
+            new MetadataRefreshOptions(new DirectoryService(_fileSystem))
+            {
+                RefreshPaths = new[] { job.Path, dir, parent },
+            },
+            RefreshPriority.High);
     }
 
     private async Task FinalizeAsync(LiveJob job, PluginConfiguration config, CancellationToken cancellationToken)
