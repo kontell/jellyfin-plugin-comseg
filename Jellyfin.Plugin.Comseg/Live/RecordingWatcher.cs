@@ -291,6 +291,11 @@ public sealed class RecordingWatcher : BackgroundService
 
         job.LastMasterWriteUtc = written;
         var breaks = EdlParser.ReadFile(master);
+        _logger.LogInformation(
+            "Comseg: analysis {Pass} of {Name}: {Breaks}",
+            job.Tracker.Passes + 1,
+            job.Item?.Name ?? Path.GetFileName(job.Path),
+            breaks.Count == 0 ? "no breaks" : string.Join(", ", breaks.Select(b => string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0:0}-{1:0}", b.Start, b.End))));
         if (job.Tracker.Observe(breaks) && job.Item is not null)
         {
             job.Published = job.Tracker.Confirmed.Count;

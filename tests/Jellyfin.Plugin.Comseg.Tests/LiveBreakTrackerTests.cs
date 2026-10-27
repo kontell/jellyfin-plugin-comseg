@@ -60,13 +60,36 @@ public class LiveBreakTrackerTests
     }
 
     [Fact]
-    public void AWithdrawnBreakLeavesThePublishedList()
+    public void AConfirmedBreakSurvivesOneAnalysisWithoutItAndGoesAfterTwo()
     {
         var tracker = new LiveBreakTracker(2, 20);
         tracker.Observe(new List<Break> { new(100, 220) });
         tracker.Observe(new List<Break> { new(100, 220) });
         Assert.Single(tracker.Confirmed);
+        Assert.False(tracker.Observe(new List<Break>()));
+        Assert.Single(tracker.Confirmed);
         Assert.True(tracker.Observe(new List<Break>()));
+        Assert.Empty(tracker.Confirmed);
+    }
+
+    [Fact]
+    public void ABreakReportedAgainAfterOneMissIsNotRestarted()
+    {
+        var tracker = new LiveBreakTracker(2, 20);
+        tracker.Observe(new List<Break> { new(100, 220) });
+        tracker.Observe(new List<Break> { new(100, 220) });
+        tracker.Observe(new List<Break>());
+        Assert.False(tracker.Observe(new List<Break> { new(100, 220) }));
+        Assert.Single(tracker.Confirmed);
+    }
+
+    [Fact]
+    public void AnUnconfirmedBreakIsDroppedTheMomentItIsMissing()
+    {
+        var tracker = new LiveBreakTracker(2, 20);
+        tracker.Observe(new List<Break> { new(100, 220) });
+        tracker.Observe(new List<Break>());
+        tracker.Observe(new List<Break> { new(100, 220) });
         Assert.Empty(tracker.Confirmed);
     }
 }

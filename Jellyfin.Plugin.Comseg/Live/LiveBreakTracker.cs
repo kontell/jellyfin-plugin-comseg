@@ -12,8 +12,11 @@ namespace Jellyfin.Plugin.Comseg.Live;
 /// in enough consecutive analyses (a start that holds still) and is long
 /// enough. Its end follows the latest analysis: while the break is still on
 /// air the end grows with each pass, and the published row is updated.
-/// Measured on a full NFL broadcast: every one-pass false break vanished on
-/// the next pass, and real starts held to within 0.1 s from first sight.
+/// Withdrawal is symmetric: a published break stays until the same number
+/// of consecutive analyses have not reported it, so one analysis changing
+/// its mind mid-break does not delete and re-create the row. Measured on a
+/// full NFL broadcast: every one-pass false break vanished on the next
+/// pass, and real starts held to within 0.1 s from first sight.
 /// </summary>
 public sealed class LiveBreakTracker
 {
@@ -45,14 +48,31 @@ public sealed class LiveBreakTracker
     {
         Passes++;
         var next = new List<Candidate>(pass.Count);
+        var matched = new HashSet<Candidate>();
         foreach (var b in pass.OrderBy(b => b.Start))
         {
             var previous = _candidates.FirstOrDefault(c => Math.Abs(c.Start - b.Start) <= StartTolerance);
+            if (previous is not null)
+            {
+                matched.Add(previous);
+            }
+
             next.Add(previous is null
-                ? new Candidate(b.Start, b.End, 1)
-                : new Candidate(b.Start, b.End, previous.Seen + 1));
+                ? new Candidate(b.Start, b.End, 1, 0)
+                : new Candidate(b.Start, b.End, previous.Seen + 1, 0));
         }
 
+        // A confirmed break the analysis stopped reporting lingers, unchanged,
+        // until it has been absent for as many analyses as it took to confirm.
+        foreach (var c in _candidates)
+        {
+            if (!matched.Contains(c) && c.Seen >= _confirmPasses && c.Missing + 1 < _confirmPasses)
+            {
+                next.Add(c with { Missing = c.Missing + 1 });
+            }
+        }
+
+        next.Sort((a, b) => a.Start.CompareTo(b.Start));
         _candidates = next;
         var confirmed = next
             .Where(c => c.Seen >= _confirmPasses && c.End - c.Start >= _minSeconds)
@@ -81,5 +101,5 @@ public sealed class LiveBreakTracker
         return true;
     }
 
-    private sealed record Candidate(double Start, double End, int Seen);
+    private sealed record Candidate(double Start, double End, int Seen, int Missing);
 }
