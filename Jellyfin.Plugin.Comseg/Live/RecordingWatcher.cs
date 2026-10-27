@@ -91,6 +91,7 @@ public sealed class RecordingWatcher : BackgroundService
             return;
         }
 
+        _logger.LogInformation("Comseg: watching for recordings in progress (live detection {State})", ComsegPlugin.Config.EnableLiveDetection ? "on" : "off");
         while (!stoppingToken.IsCancellationRequested)
         {
             var config = ComsegPlugin.Config;
@@ -183,15 +184,28 @@ public sealed class RecordingWatcher : BackgroundService
         var timers = await _liveTv.GetTimers(new TimerQuery { IsActive = true }, cancellationToken).ConfigureAwait(false);
         foreach (var timer in timers.Items)
         {
-            if (timer.Status != RecordingStatus.InProgress || string.IsNullOrEmpty(timer.Id))
+            if (timer.Status != RecordingStatus.InProgress)
             {
                 continue;
             }
 
-            var path = _recordings.GetActiveRecordingPath(timer.Id);
+            // The DTO's Id is a hash Jellyfin makes for clients; the recordings
+            // manager keys its active recordings by the service's own timer id,
+            // which the DTO carries as ExternalId.
+            var timerId = string.IsNullOrEmpty(timer.ExternalId) ? timer.Id : timer.ExternalId;
+            if (string.IsNullOrEmpty(timerId))
+            {
+                continue;
+            }
+
+            var path = _recordings.GetActiveRecordingPath(timerId);
             if (!string.IsNullOrEmpty(path))
             {
                 paths.Add(path);
+            }
+            else
+            {
+                _logger.LogDebug("Comseg: timer {Timer} is in progress but has no active recording path yet", timer.Name);
             }
         }
 
