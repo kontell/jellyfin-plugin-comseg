@@ -1,0 +1,26 @@
+name: "Comseg"
+guid: "96262b59-95a6-4283-913c-e20e0967b35c"
+# The PRIMARY ABI row (the kofinsyncqueue convention). One source tree is built
+# against several Jellyfin ABIs (.github/workflows/abis.yml); these three
+# describe the lowest one, and are what a bare `tools/package.sh` produces.
+# Every other row overrides them through the environment.
+#
+# version tracks the Jellyfin ABI it is built against: <server major.minor>.0.<build>.
+# The <build> component is shared by every row, so the same source ships as
+# 10.11.0.N and 12.0.0.N and a v12 server ranks the v12 zip highest. The
+# authority is the csproj's PluginVersion; this value is documentation and is
+# asserted against it at release time.
+version: "10.11.0.1"
+targetAbi: "10.11.0.0"
+framework: "net9.0"
+owner: "kontell"
+overview: "Commercial segments for DVR recordings, detected with Comskip"
+description: "Runs Comskip against DVR recordings, while they record and once they finish, and stores the breaks as Jellyfin Commercial media segments for any client that skips them."
+category: "General"
+image: "logo.png"
+imageUrl: "https://raw.githubusercontent.com/kontell/jellyfin-plugin-comseg/main/logo.png"
+artifacts:
+  - "Jellyfin.Plugin.Comseg.dll"
+changelog: |-
+  - First release: live detection on recordings in progress (patched Comskip),
+    full pass on finished recordings, Commercial media segments.

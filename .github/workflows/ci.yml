@@ -1,0 +1,153 @@
+# Quality gate + PR install zips. Shape mirrors plugin.video.kofin's ci.yml and
+# the pvr.kofin build/release split: this file is the every-PR gate, release.yml
+# handles tags.
+#
+# This repo had no PR gate at all until now: release.yml fires on a tag and
+# notify-repo.yml on a publish, so nothing checked a branch. Both ABI rows are
+# built here — a gate that only checks the line you happen to run is not a gate,
+# and the sibling plugin proved that the hard way when a -p:TargetFramework
+# override that MSBuild strips before restore got as far as a merge.
+#
+# The ABI rows come from abis.yml, shared with release.yml, so the gate and the
+# release cannot disagree about what is supported.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  abis:
+    uses: ./.github/workflows/abis.yml
+
+  format:
+    name: format
+    needs: abis
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ fromJson(needs.abis.outputs.primary).dotnet }}
+
+      # Unscoped, unlike jellyfin-plugin-syncplayv2's, which has to exclude its
+      # vendored Engine tree. Nothing here is vendored — this plugin is
+      # clean-room — so there is no tree that must stay byte-comparable with an
+      # upstream branch.
+      - name: dotnet format --verify-no-changes
+        run: dotnet format --verify-no-changes
+
+  test:
+    name: test (${{ matrix.row.abi }})
+    needs: abis
+    runs-on: ubuntu-latest
+    continue-on-error: ${{ matrix.row.preview }}
+    strategy:
+      fail-fast: false
+      matrix:
+        row: ${{ fromJson(needs.abis.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ matrix.row.dotnet }}
+
+      # No -warnaserror flag needed: both csprojs already set
+      # TreatWarningsAsErrors. Building both projects makes this the compile
+      # gate for the row too.
+      - name: Run tests
+        run: |
+          dotnet test -c Release --nologo \
+            -p:JellyfinFramework=${{ matrix.row.framework }} \
+            -p:JellyfinVersion=${{ matrix.row.jellyfin }}
+
+  package:
+    name: package (${{ matrix.row.abi }})
+    # Independent of format/test so a style failure still yields an install zip
+    # — same stance as plugin.video.kofin's package job.
+    needs: abis
+    runs-on: ubuntu-latest
+    continue-on-error: ${{ matrix.row.preview }}
+    strategy:
+      fail-fast: false
+      matrix:
+        row: ${{ fromJson(needs.abis.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ matrix.row.dotnet }}
+
+      - name: Build zip
+        run: tools/package.sh dist
+        env:
+          ABI_BASE: ${{ matrix.row.base }}
+          TARGET_ABI: ${{ matrix.row.targetAbi }}
+          FRAMEWORK: ${{ matrix.row.framework }}
+          JELLYFIN_VERSION: ${{ matrix.row.jellyfin }}
+
+      # The row's own targetAbi must reach meta.json, which is the only thing a
+      # Jellyfin server reads to decide whether it can run this build. A zip
+      # claiming the wrong floor is the one error the manifest cannot correct,
+      # so it is asserted here as well as at release time.
+      #
+      # imagePath is checked in the same breath because the server does not
+      # complain about a broken one: it 404s /Plugins/{id}/{version}/Image and
+      # renders the same blank tile a plugin with no logo gets.
+      - name: Assert the zip declares this row's floor
+        shell: bash
+        run: |
+          set -euo pipefail
+          zip="$(ls dist/comseg_*.zip)"
+          unzip -l "$zip" | grep -q ' meta.json$' \
+            || { echo "zip has no meta.json at its root" >&2; exit 1; }
+          abi="$(unzip -p "$zip" meta.json | jq -r .targetAbi)"
+          version="$(unzip -p "$zip" meta.json | jq -r .version)"
+          echo "$zip: version $version, targetAbi $abi"
+          [[ "$abi" == "${{ matrix.row.targetAbi }}" ]] \
+            || { echo "meta.json targetAbi $abi != ${{ matrix.row.targetAbi }}" >&2; exit 1; }
+          [[ "$version" == ${{ matrix.row.base }}.* ]] \
+            || { echo "version $version is not on base ${{ matrix.row.base }}" >&2; exit 1; }
+          image="$(unzip -p "$zip" meta.json | jq -r '.imagePath // ""')"
+          [[ -n "$image" ]] || { echo "meta.json names no imagePath" >&2; exit 1; }
+          unzip -l "$zip" | grep -q " $image\$" \
+            || { echo "imagePath $image is not in the zip" >&2; exit 1; }
+          echo "image: $image"
+
+      # Named for the run, not for the release: a PR zip must not be mistakable
+      # for a published asset, which is what repository.kontell's asset_glob
+      # matches on.
+      - name: Name zip for this run
+        id: name
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          zips=(dist/comseg_*.zip)
+          if [[ ${#zips[@]} -ne 1 ]]; then
+            echo "expected exactly one zip in dist/, got: ${zips[*]:-none}" >&2
+            exit 1
+          fi
+          src="${zips[0]}"
+          base="$(basename "$src" .zip)"
+          sha7="$(echo "${{ github.sha }}" | cut -c1-7)"
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            dest="dist/${base}-pr${{ github.event.pull_request.number }}-${sha7}.zip"
+          else
+            dest="dist/${base}-main-${sha7}.zip"
+          fi
+          mv "$src" "$dest"
+          echo "zip=$dest" >> "$GITHUB_OUTPUT"
+          ls -la dist/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: comseg-zip-${{ matrix.row.abi }}
+          path: ${{ steps.name.outputs.zip }}
+          retention-days: 14
+          if-no-files-found: error

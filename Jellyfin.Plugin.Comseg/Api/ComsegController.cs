@@ -1,0 +1,188 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Net.Mime;
+using System.Threading;
+using System.Threading.Tasks;
+using Jellyfin.Plugin.Comseg.Comskip;
+using Jellyfin.Plugin.Comseg.Live;
+using Jellyfin.Plugin.Comseg.Segments;
+using MediaBrowser.Controller.Library;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
+
+namespace Jellyfin.Plugin.Comseg.Api;
+
+/// <summary>Admin endpoints behind the configuration page.</summary>
+[ApiController]
+[Authorize(Policy = "RequiresElevation")]
+[Route("Comseg")]
+[Produces(MediaTypeNames.Application.Json)]
+public class ComsegController : ControllerBase
+{
+    private readonly RecordingWatcher _watcher;
+    private readonly ComskipRunner _runner;
+    private readonly CompletedPass _pass;
+    private readonly SegmentStore _store;
+    private readonly DetectionRegistry _registry;
+    private readonly ILibraryManager _library;
+    private readonly ILogger<ComsegController> _logger;
+
+    /// <summary>Initializes a new instance of the <see cref="ComsegController"/> class.</summary>
+    /// <param name="watcher">The watcher.</param>
+    /// <param name="runner">The Comskip runner.</param>
+    /// <param name="pass">The full-pass runner.</param>
+    /// <param name="store">The segment store.</param>
+    /// <param name="registry">The detection registry.</param>
+    /// <param name="library">The library manager.</param>
+    /// <param name="logger">The logger.</param>
+    public ComsegController(
+        RecordingWatcher watcher,
+        ComskipRunner runner,
+        CompletedPass pass,
+        SegmentStore store,
+        DetectionRegistry registry,
+        ILibraryManager library,
+        ILogger<ComsegController> logger)
+    {
+        _watcher = watcher;
+        _runner = runner;
+        _pass = pass;
+        _store = store;
+        _registry = registry;
+        _library = library;
+        _logger = logger;
+    }
+
+    /// <summary>The live jobs and the configured binary.</summary>
+    /// <returns>The status.</returns>
+    [HttpGet("Status")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public ActionResult<StatusResponse> GetStatus()
+    {
+        var jobs = _watcher.Snapshot().Select(j => new JobStatus
+        {
+            Path = j.Path,
+            ItemId = j.Item?.Id,
+            Name = j.Item?.Name,
+            StartedUtc = j.StartedUtc,
+            Analyses = j.Tracker.Passes,
+            Published = j.Published,
+            ProcessRunning = j.Process is not null && !j.Process.HasExited,
+            Finalizing = j.Finalizing,
+            LastError = j.LastError,
+        }).ToList();
+        return new StatusResponse { ComskipPath = ComsegPlugin.Config.ComskipPath, ProviderId = Providers.ComsegSegmentProvider.ProviderId, Jobs = jobs };
+    }
+
+    /// <summary>Runs the configured Comskip with --help to prove the path works.</summary>
+    /// <param name="cancellationToken">Cancellation.</param>
+    /// <returns>The banner, or the error.</returns>
+    [HttpPost("Check")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<ActionResult<CheckResponse>> Check(CancellationToken cancellationToken)
+    {
+        var (ok, text) = await _runner.ProbeAsync(ComsegPlugin.Config.ComskipPath, cancellationToken).ConfigureAwait(false);
+        return new CheckResponse { Ok = ok, Text = text };
+    }
+
+    /// <summary>Runs a full pass over a finished recording in the background, replacing its rows.</summary>
+    /// <param name="itemId">The item.</param>
+    /// <returns>202 when queued.</returns>
+    [HttpPost("Detect/{itemId}")]
+    [ProducesResponseType(StatusCodes.Status202Accepted)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public ActionResult Detect([FromRoute] Guid itemId)
+    {
+        var item = _library.GetItemById(itemId);
+        if (item is null || string.IsNullOrEmpty(item.Path))
+        {
+            return NotFound();
+        }
+
+        if (!_registry.TryEnter(item.Id))
+        {
+            return Conflict("a detection is already running for this item");
+        }
+
+        var config = ComsegPlugin.Config;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var breaks = await _pass.RunAsync(item.Path, config, CancellationToken.None).ConfigureAwait(false);
+                if (breaks is not null)
+                {
+                    await _store.ReplaceAsync(item, breaks).ConfigureAwait(false);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Comseg: on-demand detection failed for {Name}", item.Name);
+            }
+            finally
+            {
+                _registry.Exit(item.Id);
+                _store.Forget(item.Id);
+            }
+        });
+        return Accepted();
+    }
+
+    /// <summary>The status response.</summary>
+    public sealed class StatusResponse
+    {
+        /// <summary>Gets or sets the configured binary.</summary>
+        public string ComskipPath { get; set; } = string.Empty;
+
+        /// <summary>Gets or sets the provider id Jellyfin filters by.</summary>
+        public string ProviderId { get; set; } = string.Empty;
+
+        /// <summary>Gets or sets the live jobs.</summary>
+        public IReadOnlyList<JobStatus> Jobs { get; set; } = Array.Empty<JobStatus>();
+    }
+
+    /// <summary>One live job.</summary>
+    public sealed class JobStatus
+    {
+        /// <summary>Gets or sets the recording file.</summary>
+        public string Path { get; set; } = string.Empty;
+
+        /// <summary>Gets or sets the item id, once known.</summary>
+        public Guid? ItemId { get; set; }
+
+        /// <summary>Gets or sets the item name, once known.</summary>
+        public string? Name { get; set; }
+
+        /// <summary>Gets or sets when the job started.</summary>
+        public DateTime StartedUtc { get; set; }
+
+        /// <summary>Gets or sets how many analyses were read.</summary>
+        public int Analyses { get; set; }
+
+        /// <summary>Gets or sets how many breaks are published.</summary>
+        public int Published { get; set; }
+
+        /// <summary>Gets or sets a value indicating whether Comskip is running.</summary>
+        public bool ProcessRunning { get; set; }
+
+        /// <summary>Gets or sets a value indicating whether the final pass is running.</summary>
+        public bool Finalizing { get; set; }
+
+        /// <summary>Gets or sets the last problem.</summary>
+        public string? LastError { get; set; }
+    }
+
+    /// <summary>The check response.</summary>
+    public sealed class CheckResponse
+    {
+        /// <summary>Gets or sets a value indicating whether Comskip ran.</summary>
+        public bool Ok { get; set; }
+
+        /// <summary>Gets or sets the banner or error.</summary>
+        public string Text { get; set; } = string.Empty;
+    }
+}

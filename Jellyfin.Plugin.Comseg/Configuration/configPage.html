@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>Comseg</title>
+</head>
+<body>
+<div id="comsegConfigPage" data-role="page" class="page type-interior pluginConfigurationPage" data-require="emby-input,emby-button,emby-checkbox,emby-textarea">
+    <div data-role="content">
+        <div class="content-primary">
+            <form id="comsegConfigForm">
+                <div class="verticalSection verticalSection-extrabottompadding">
+                    <div class="sectionTitleContainer flex align-items-center">
+                        <h2 class="sectionTitle">Comseg</h2>
+                    </div>
+                    <div class="fieldDescription">
+                        Commercial breaks in DVR recordings, found with Comskip and stored as Jellyfin
+                        Commercial media segments. Recordings still being written are analysed while they
+                        record (this needs the patched Comskip build described in the README); finished
+                        recordings get a full pass from the Media Segment Scan.
+                    </div>
+                    <br />
+                    <div class="inputContainer">
+                        <input is="emby-input" type="text" id="txtComskipPath" label="Comskip executable" />
+                        <div class="fieldDescription">Path to the comskip binary, or a bare name found on the server's PATH.</div>
+                    </div>
+                    <div class="inputContainer">
+                        <button is="emby-button" type="button" id="btnCheck" class="raised"><span>Check Comskip</span></button>
+                        <div class="fieldDescription" id="checkResult"></div>
+                    </div>
+                    <div class="inputContainer">
+                        <input is="emby-input" type="text" id="txtIniPath" label="Comskip ini (optional)" />
+                        <div class="fieldDescription">A comskip.ini to use instead of the built-in one. The plugin always sets the run-mode keys itself.</div>
+                    </div>
+                    <div class="inputContainer">
+                        <input is="emby-input" type="text" id="txtWorkDirectory" label="Work directory (optional)" />
+                        <div class="fieldDescription">Where Comskip writes its files. Empty uses a comseg folder under Jellyfin's data directory.</div>
+                    </div>
+                    <div class="checkboxContainer checkboxContainer-withDescription">
+                        <label class="emby-checkbox-label">
+                            <input is="emby-checkbox" type="checkbox" id="chkLive" />
+                            <span>Detect while recording</span>
+                        </label>
+                        <div class="fieldDescription checkboxDescription">Run Comskip against each recording as it is written and publish breaks as they are confirmed.</div>
+                    </div>
+                    <div class="checkboxContainer checkboxContainer-withDescription">
+                        <label class="emby-checkbox-label">
+                            <input is="emby-checkbox" type="checkbox" id="chkCompleted" />
+                            <span>Full pass on finished recordings</span>
+                        </label>
+                        <div class="fieldDescription checkboxDescription">Replace a recording's breaks with a full analysis once it finishes, and analyse recordings the Media Segment Scan finds without breaks.</div>
+                    </div>
+                    <div class="inputContainer">
+                        <input is="emby-input" type="number" id="txtInterval" pattern="[0-9]*" min="10" max="3600" label="Live analysis interval (seconds of content)" />
+                        <div class="fieldDescription">How often the live Comskip re-runs its full analysis over what it has seen so far. 60 is a good default.</div>
+                    </div>
+                    <div class="inputContainer">
+                        <input is="emby-input" type="number" id="txtConfirm" pattern="[0-9]*" min="1" max="10" label="Analyses before a break is published" />
+                        <div class="fieldDescription">A break must be reported by this many consecutive analyses. 2 drops the one-off false breaks seen on sports feeds.</div>
+                    </div>
+                    <div class="inputContainer">
+                        <input is="emby-input" type="number" id="txtMinBreak" pattern="[0-9]*" min="0" max="600" label="Shortest break published (seconds)" />
+                    </div>
+                    <div class="inputContainer">
+                        <input is="emby-input" type="number" id="txtMaxLive" pattern="[0-9]*" min="1" max="16" label="Recordings analysed live at once" />
+                    </div>
+                    <div class="inputContainer">
+                        <input is="emby-input" type="number" id="txtThreads" pattern="[0-9]*" min="1" max="64" label="Comskip decoder threads" />
+                    </div>
+                    <div class="inputContainer">
+                        <input is="emby-input" type="number" id="txtRetries" pattern="[0-9]*" min="1" max="100000" label="Live stall tolerance (4-second retries)" />
+                        <div class="fieldDescription">Comskip waits this many 4 s rounds for a recording that stopped growing before it gives up. 300 is 20 minutes.</div>
+                    </div>
+                    <div class="inputContainer">
+                        <input is="emby-input" type="number" id="txtPoll" pattern="[0-9]*" min="5" max="300" label="Poll interval for recordings in progress (seconds)" />
+                    </div>
+                    <div class="inputContainer">
+                        <input is="emby-input" type="number" id="txtTimeout" pattern="[0-9]*" min="5" max="1440" label="Full pass time limit (minutes)" />
+                    </div>
+                    <div class="inputContainer">
+                        <textarea is="emby-textarea" id="txtExtraPaths" label="Extra recording folders (one per line)" rows="3"></textarea>
+                        <div class="fieldDescription">Jellyfin's own recording folders are always included.</div>
+                    </div>
+                    <br />
+                    <button is="emby-button" type="submit" class="raised button-submit block">
+                        <span>Save</span>
+                    </button>
+                </div>
+            </form>
+            <div class="verticalSection">
+                <div class="sectionTitleContainer flex align-items-center">
+                    <h2 class="sectionTitle">Recordings in progress</h2>
+                    <button is="emby-button" type="button" id="btnRefresh" class="raised" style="margin-left: 1em"><span>Refresh</span></button>
+                </div>
+                <div id="comsegStatus" class="fieldDescription">Loading…</div>
+            </div>
+        </div>
+    </div>
+    <script type="text/javascript">
+        (function () {
+            var pluginId = "96262b59-95a6-4283-913c-e20e0967b35c";
+            var page = document.querySelector('#comsegConfigPage');
+
+            function setValue(id, value) { document.querySelector(id).value = value; }
+            function num(id, fallback) { var v = parseInt(document.querySelector(id).value, 10); return isNaN(v) ? fallback : v; }
+
+            function load() {
+                Dashboard.showLoadingMsg();
+                ApiClient.getPluginConfiguration(pluginId).then(function (config) {
+                    setValue('#txtComskipPath', config.ComskipPath || '');
+                    setValue('#txtIniPath', config.IniPath || '');
+                    setValue('#txtWorkDirectory', config.WorkDirectory || '');
+                    document.querySelector('#chkLive').checked = !!config.EnableLiveDetection;
+                    document.querySelector('#chkCompleted').checked = !!config.EnableCompletedDetection;
+                    setValue('#txtInterval', config.LiveMasterIntervalSeconds);
+                    setValue('#txtConfirm', config.ConfirmPasses);
+                    setValue('#txtMinBreak', config.MinBreakSeconds);
+                    setValue('#txtMaxLive', config.MaxConcurrentLive);
+                    setValue('#txtThreads', config.ThreadCount);
+                    setValue('#txtRetries', config.LiveTvRetries);
+                    setValue('#txtPoll', config.PollSeconds);
+                    setValue('#txtTimeout', config.CompletedPassTimeoutMinutes);
+                    setValue('#txtExtraPaths', config.ExtraRecordingPaths || '');
+                    Dashboard.hideLoadingMsg();
+                });
+            }
+
+            function escapeHtml(text) {
+                return String(text).replace(/[&<>"]/g, function (c) {
+                    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+                });
+            }
+
+            function status() {
+                var box = document.querySelector('#comsegStatus');
+                ApiClient.getJSON(ApiClient.getUrl('Comseg/Status')).then(function (s) {
+                    if (!s.Jobs || s.Jobs.length === 0) {
+                        box.innerHTML = 'No recording is being analysed right now.';
+                        return;
+                    }
+                    var rows = s.Jobs.map(function (j) {
+                        return '<li>' + escapeHtml(j.Name || j.Path) + ' — analyses: ' + j.Analyses
+                            + ', published breaks: ' + j.Published
+                            + (j.ProcessRunning ? ', Comskip running' : ', Comskip not running')
+                            + (j.Finalizing ? ', finishing' : '')
+                            + (j.LastError ? ', ' + escapeHtml(j.LastError) : '')
+                            + '</li>';
+                    });
+                    box.innerHTML = '<ul>' + rows.join('') + '</ul>';
+                }).catch(function () {
+                    box.innerHTML = 'Status unavailable.';
+                });
+            }
+
+            page.addEventListener('pageshow', function () { load(); status(); });
+            document.querySelector('#btnRefresh').addEventListener('click', status);
+
+            document.querySelector('#btnCheck').addEventListener('click', function () {
+                var out = document.querySelector('#checkResult');
+                out.textContent = 'Running…';
+                ApiClient.ajax({ type: 'POST', url: ApiClient.getUrl('Comseg/Check'), dataType: 'json' }).then(function (r) {
+                    out.textContent = (r.Ok ? 'OK: ' : 'Failed: ') + r.Text;
+                }).catch(function () {
+                    out.textContent = 'The check request failed.';
+                });
+            });
+
+            document.querySelector('#comsegConfigForm').addEventListener('submit', function (e) {
+                e.preventDefault();
+                Dashboard.showLoadingMsg();
+                ApiClient.getPluginConfiguration(pluginId).then(function (config) {
+                    config.ComskipPath = document.querySelector('#txtComskipPath').value.trim() || 'comskip';
+                    config.IniPath = document.querySelector('#txtIniPath').value.trim();
+                    config.WorkDirectory = document.querySelector('#txtWorkDirectory').value.trim();
+                    config.EnableLiveDetection = document.querySelector('#chkLive').checked;
+                    config.EnableCompletedDetection = document.querySelector('#chkCompleted').checked;
+                    config.LiveMasterIntervalSeconds = num('#txtInterval', 60);
+                    config.ConfirmPasses = num('#txtConfirm', 2);
+                    config.MinBreakSeconds = num('#txtMinBreak', 20);
+                    config.MaxConcurrentLive = num('#txtMaxLive', 2);
+                    config.ThreadCount = num('#txtThreads', 4);
+                    config.LiveTvRetries = num('#txtRetries', 300);
+                    config.PollSeconds = num('#txtPoll', 15);
+                    config.CompletedPassTimeoutMinutes = num('#txtTimeout', 90);
+                    config.ExtraRecordingPaths = document.querySelector('#txtExtraPaths').value;
+                    ApiClient.updatePluginConfiguration(pluginId, config).then(function (result) {
+                        Dashboard.processPluginConfigurationUpdateResult(result);
+                    });
+                });
+                return false;
+            });
+        })();
+    </script>
+</div>
+</body>
+</html>

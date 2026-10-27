@@ -1,0 +1,69 @@
+# The supported Jellyfin ABIs, in one place.
+#
+# One source tree ships to several server lines: Jellyfin serves a single
+# manifest.json in which each entry carries its own targetAbi and the server
+# picks the highest it can run, so supporting 10.11 and 12 is a build matrix
+# rather than a branch pair. Both ci.yml (every PR) and release.yml (every tag)
+# call this to get the row list, because a second copy of it would drift — and
+# drift between the gate and the release is the failure that costs most.
+#
+# Per row:
+#
+#   abi        display name, and the artifact suffix
+#   base       version prefix; the full version is <base>.<build>, with <build>
+#              from the csproj's PluginVersion, so every row moves together.
+#              That lockstep is load-bearing: targetAbi is a *floor*, and
+#              Jellyfin will offer a newer server an older-ABI build
+#              (jellyfin#11331, closed Not A Bug), so the only thing stopping a
+#              v12 server taking the 10.11 zip is that 12.0.0.N sorts above
+#              10.11.0.N.
+#   targetAbi  the floor written into meta.json
+#   framework  passed as -p:JellyfinFramework, NOT -p:TargetFramework: MSBuild
+#              strips a global TargetFramework before restore, which restores
+#              the row's packages against the csproj default and NU1202s.
+#   dotnet     SDK for the row
+#   jellyfin   the Jellyfin.Controller/Data pin, always the OLDEST supported
+#              patch of that line — .NET binds a reference upward but never
+#              downward (verified in the syncplayv2 M0 spike).
+#   primary    the row the tag names and build.yaml documents. Exactly one.
+#   preview    built against a Jellyfin prerelease, so it may fail for reasons
+#              that are not ours and must not hold up the other rows.
+name: ABIs
+
+on:
+  workflow_call:
+    outputs:
+      matrix:
+        description: "The supported ABI rows, as JSON, for a job matrix."
+        value: ${{ jobs.rows.outputs.matrix }}
+      primary:
+        description: "The primary row alone, as JSON, for jobs that run once."
+        value: ${{ jobs.rows.outputs.primary }}
+
+permissions: {}
+
+jobs:
+  rows:
+    name: abis
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.rows.outputs.matrix }}
+      primary: ${{ steps.rows.outputs.primary }}
+    steps:
+      - id: rows
+        shell: bash
+        run: |
+          set -euo pipefail
+          rows='[
+            {"abi":"10.11","base":"10.11.0","targetAbi":"10.11.0.0",
+             "framework":"net9.0","dotnet":"9.0.x","jellyfin":"10.11.0",
+             "primary":true,"preview":false},
+            {"abi":"12.0","base":"12.0.0","targetAbi":"12.0.0.0",
+             "framework":"net10.0","dotnet":"10.0.x","jellyfin":"12.0.0-rc5",
+             "primary":false,"preview":true}
+          ]'
+          test "$(jq '[.[] | select(.primary)] | length' <<<"$rows")" -eq 1 \
+            || { echo "exactly one row must be primary" >&2; exit 1; }
+          echo "matrix=$(jq -c . <<<"$rows")" >> "$GITHUB_OUTPUT"
+          echo "primary=$(jq -c '[.[] | select(.primary)][0]' <<<"$rows")" >> "$GITHUB_OUTPUT"
+          jq -r '.[] | "  \(.abi): \(.framework), Jellyfin \(.jellyfin)\(if .preview then " (preview)" else "" end)"' <<<"$rows"

@@ -1,0 +1,6 @@
+bin/
+obj/
+artifacts/
+*.user
+dist/
+.plugin-guid

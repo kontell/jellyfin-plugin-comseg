@@ -1,0 +1,50 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- One source tree, several Jellyfin ABIs (the kofinsyncqueue convention).
+       Everything that differs between rows is a property with a default here,
+       overridden per row by the build matrix (.github/workflows/abis.yml). No
+       overrides gives the primary row, which is what a local build wants. -->
+  <PropertyGroup>
+    <JellyfinVersion Condition="'$(JellyfinVersion)' == ''">10.11.0</JellyfinVersion>
+    <!-- Deliberately NOT overridden as TargetFramework: MSBuild strips a global
+         TargetFramework before restore, so -p:TargetFramework=net10.0 restores
+         the row's packages against the default here and NU1202s. A custom
+         property survives restore and then sets the real one. -->
+    <JellyfinFramework Condition="'$(JellyfinFramework)' == ''">net9.0</JellyfinFramework>
+    <TargetFramework>$(JellyfinFramework)</TargetFramework>
+    <!-- <server major.minor>.0.<build>; the build number is shared by every
+         row so a v12 server ranks the v12 zip above the 10.11 one (Jellyfin
+         treats targetAbi as a floor, jellyfin#11331). -->
+    <PluginVersion Condition="'$(PluginVersion)' == ''">10.11.0.1</PluginVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <AssemblyVersion>$(PluginVersion)</AssemblyVersion>
+    <FileVersion>$(PluginVersion)</FileVersion>
+    <RootNamespace>Jellyfin.Plugin.Comseg</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Remove="Configuration\configPage.html" />
+    <EmbeddedResource Include="Configuration\configPage.html" />
+    <None Remove="Comskip\comskip.ini" />
+    <EmbeddedResource Include="Comskip\comskip.ini" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Pin to the OLDEST supported patch of the row's line, and do NOT float:
+         .NET binds an assembly reference upward but never downward. -->
+    <PackageReference Include="Jellyfin.Controller" Version="[$(JellyfinVersion)]" />
+    <PackageReference Include="Jellyfin.Data" Version="[$(JellyfinVersion)]" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Jellyfin.Plugin.Comseg.Tests" />
+  </ItemGroup>
+
+</Project>

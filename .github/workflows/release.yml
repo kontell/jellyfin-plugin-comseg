@@ -1,0 +1,215 @@
+# Tag release: build, test and package the Jellyfin-installable zip **once per
+# supported ABI**, then draft a single GitHub release carrying all of them.
+# Same job shape and the same draft-not-publish stance as
+# jellyfin-plugin-syncplayv2's, so both server plugins release identically.
+#
+# One source tree, several server lines. Jellyfin serves one manifest.json in
+# which each entry carries its own targetAbi and the server self-selects, so
+# supporting 10.11 and 12 is a build matrix rather than a branch pair — the
+# whole divergence is the target framework, the package pin and the version
+# prefix. The row list lives in abis.yml, shared with ci.yml.
+#
+# Draft, deliberately. Publishing is what repository.kontell reacts to
+# (notify-repo.yml), so a release stays a draft until a human has looked at the
+# zips. See that repo's docs/publishing.md.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Skip release creation — run checks and build only"
+        type: boolean
+        default: false
+
+# Least privilege by default: check/package only read. The release job alone
+# needs write to create the draft.
+permissions:
+  contents: read
+
+env:
+  PLUGIN_NAME: Comseg
+
+jobs:
+  # The supported ABIs, from the one place they are defined; ci.yml calls the
+  # same workflow, so the gate and the release can never disagree about which
+  # server lines are built.
+  abis:
+    uses: ./.github/workflows/abis.yml
+
+  check:
+    name: test (${{ matrix.row.abi }})
+    needs: abis
+    runs-on: ubuntu-latest
+    continue-on-error: ${{ matrix.row.preview }}
+    strategy:
+      fail-fast: false
+      matrix:
+        row: ${{ fromJson(needs.abis.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ matrix.row.dotnet }}
+      - name: Run tests
+        run: |
+          dotnet test -c Release --nologo \
+            -p:JellyfinFramework=${{ matrix.row.framework }} \
+            -p:JellyfinVersion=${{ matrix.row.jellyfin }}
+
+  package:
+    name: package (${{ matrix.row.abi }})
+    needs: [abis, check]
+    runs-on: ubuntu-latest
+    continue-on-error: ${{ matrix.row.preview }}
+    strategy:
+      fail-fast: false
+      matrix:
+        row: ${{ fromJson(needs.abis.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ matrix.row.dotnet }}
+
+      - name: Build zip
+        run: tools/package.sh dist
+        env:
+          ABI_BASE: ${{ matrix.row.base }}
+          TARGET_ABI: ${{ matrix.row.targetAbi }}
+          FRAMEWORK: ${{ matrix.row.framework }}
+          JELLYFIN_VERSION: ${{ matrix.row.jellyfin }}
+
+      # The csproj's PluginVersion is the single source of version truth: every
+      # row's version is <its base>.<that build number>, so the rows stay in
+      # lockstep and a v12 server always ranks the v12 zip above the 10.11 one.
+      # build.yaml documents the primary row, so it must agree or the manifest
+      # and the release notes would describe different builds.
+      - name: Assert the primary row, build.yaml and the tag all agree
+        if: matrix.row.primary
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(sed -n 's/.*<PluginVersion[^>]*>\(.*\)<\/PluginVersion>.*/\1/p' \
+            Jellyfin.Plugin.Comseg/Jellyfin.Plugin.Comseg.csproj)"
+          declared="$(sed -n 's/^version: *"\(.*\)"/\1/p' build.yaml)"
+          echo "PluginVersion=$version  build.yaml=$declared"
+          if [[ "$declared" != "$version" ]]; then
+            echo "build.yaml version $declared does not match PluginVersion $version" >&2
+            exit 1
+          fi
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            tag="${GITHUB_REF_NAME#v}"
+            echo "tag=$tag"
+            if [[ "$tag" != "$version" ]]; then
+              echo "tag v$tag does not match PluginVersion $version" >&2
+              exit 1
+            fi
+          fi
+
+      # repository.kontell finds this release by asset_glob "comseg_*.zip"
+      # (addons.toml) and rejects a zip with no meta.json at its root. Both are
+      # cheaper to catch here than in the publish run of another repository.
+      # It must also carry the row's own targetAbi — a zip that claims the wrong
+      # floor is the one failure the manifest cannot correct — and the logo its
+      # imagePath names, which the server 404s in silence when it is missing.
+      - name: Assert the zip is one repository.kontell will accept
+        shell: bash
+        run: |
+          set -euo pipefail
+          zip="$(ls dist/comseg_*.zip)"
+          echo "asset: $zip"
+          unzip -l "$zip" | grep -q ' meta.json$' \
+            || { echo "zip has no meta.json at its root" >&2; exit 1; }
+          abi="$(unzip -p "$zip" meta.json | jq -r .targetAbi)"
+          [[ "$abi" == "${{ matrix.row.targetAbi }}" ]] \
+            || { echo "meta.json targetAbi $abi != ${{ matrix.row.targetAbi }}" >&2; exit 1; }
+          image="$(unzip -p "$zip" meta.json | jq -r '.imagePath // ""')"
+          [[ -n "$image" ]] || { echo "meta.json names no imagePath" >&2; exit 1; }
+          unzip -l "$zip" | grep -q " $image\$" \
+            || { echo "imagePath $image is not in the zip" >&2; exit 1; }
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: comseg-release-zip-${{ matrix.row.abi }}
+          path: dist/*.zip
+          if-no-files-found: error
+
+  release:
+    name: release
+    needs: [abis, package]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # draft GitHub release + asset upload
+    if: |
+      startsWith(github.ref, 'refs/tags/v') ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run != 'true')
+    steps:
+      - uses: actions/checkout@v5
+
+      # Every row's zip, into one directory. merge-multiple is what makes the
+      # release carry the whole set rather than whichever finished last.
+      - name: Download zips
+        uses: actions/download-artifact@v4
+        with:
+          pattern: comseg-release-zip-*
+          merge-multiple: true
+          path: dist
+
+      # A preview row is allowed to fail, so the set can legitimately be short.
+      # Say which rows arrived rather than letting a silently missing ABI look
+      # like a complete release.
+      - name: Report the set
+        shell: bash
+        run: |
+          set -euo pipefail
+          ls -la dist/
+          expected='${{ needs.abis.outputs.matrix }}'
+          for abi in $(jq -r '.[].base' <<<"$expected"); do
+            if ls "dist/comseg_${abi}."*.zip >/dev/null 2>&1; then
+              echo "::notice::$abi built"
+            else
+              echo "::warning::$abi produced no zip — it is not in this release"
+            fi
+          done
+          test -n "$(ls -A dist/)" || { echo "no zips at all" >&2; exit 1; }
+
+      - name: Get version and changelog
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(sed -n 's/.*<PluginVersion[^>]*>\(.*\)<\/PluginVersion>.*/\1/p' \
+            Jellyfin.Plugin.Comseg/Jellyfin.Plugin.Comseg.csproj)"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "tag=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=v$version" >> "$GITHUB_OUTPUT"
+          fi
+          # build.yaml's changelog block, the same text tools/package.sh puts in
+          # meta.json and repository.kontell surfaces in manifest.json. One
+          # source, so the release notes and the plugin catalogue cannot drift.
+          changes="$(awk '
+            /^changelog:[[:space:]]*\|-?[[:space:]]*$/ { flag = 1; next }
+            flag && /^[^[:space:]]/ { exit }
+            flag { sub(/^  /, ""); print }
+          ' build.yaml)"
+          EOF="$(dd if=/dev/urandom bs=15 count=1 status=none | base64)"
+          {
+            echo "changes<<$EOF"
+            echo "$changes"
+            echo "$EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create draft release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.meta.outputs.tag }}
+          name: ${{ env.PLUGIN_NAME }} ${{ steps.meta.outputs.tag }}
+          body: ${{ steps.meta.outputs.changes }}
+          draft: true
+          files: dist/*.zip
