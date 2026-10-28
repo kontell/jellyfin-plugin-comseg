@@ -16,7 +16,7 @@ Dashboard → Plugins → Comseg.
 | Setting | Default | |
 | --- | --- | --- |
 | Comskip executable | `comskip` | Path or a name on the server's PATH. "Check Comskip" runs it. |
-| Comskip ini | built-in | The built-in ini sets `ticker_tape=160`, which keeps provider watermarks and score bugs out of the logo search; without it Comskip found nothing on a Sky Sports feed. |
+| Comskip ini | built-in | The built-in ini sets `ticker_tape=160`, which keeps provider watermarks and score bugs out of the logo search. |
 | Detect while recording | on | Needs the Comseg build of Comskip. |
 | Full pass on finished recordings | on | Also what the Media Segment Scan runs. |
 | Live analysis interval | 60 s | `live_master_interval`. |
