@@ -4,10 +4,10 @@ Jellyfin server plugin: commercial breaks in DVR recordings, found with [Comskip
 
 Two paths:
 
-- **While a recording is being written.** The plugin watches Jellyfin's timers for recordings in progress, runs Comskip live against each file and reads the full analysis that Comskip, with the plugin's [live-analysis patch](comskip/README.md), writes every minute of content. A break is published once two consecutive analyses agree on where it starts; its end follows the latest analysis while the break is still on air, so a viewer a couple of minutes behind live skips it.
+- **While a recording is being written.** The plugin watches Jellyfin's timers for recordings in progress, runs Comskip live against each file and reads the full analysis the [Comseg build of Comskip](https://github.com/kontell/Comskip) writes every minute of content. A break is published once two consecutive analyses agree on where it starts; its end follows the latest analysis while the break is still on air, so a viewer a couple of minutes behind live skips it.
 - **Once a recording finishes.** A full pass replaces the live breaks with Comskip's final result. Recordings that the scheduled *Media Segment Scan* finds without breaks get the same pass.
 
-Requires Jellyfin 12 and a Comskip binary on the server. Finished recordings work with stock Comskip. Detection while a recording is being written needs Comskip built with the [live-analysis patch](comskip/README.md), because Comskip's own live mode only reports breaks that contain black frames.
+Requires Jellyfin 12 and a Comskip binary on the server. Finished recordings work with stock Comskip. Detection while a recording is being written needs the [Comseg build of Comskip](https://github.com/kontell/Comskip), branch `comseg`, which adds a periodic full analysis to Comskip's live mode; stock live mode only reports breaks that contain black frames. The change is on its way upstream, see the notes in [`comskip/`](comskip/README.md).
 
 ## Settings
 
@@ -17,7 +17,7 @@ Dashboard → Plugins → Comseg.
 | --- | --- | --- |
 | Comskip executable | `comskip` | Path or a name on the server's PATH. "Check Comskip" runs it. |
 | Comskip ini | built-in | The built-in ini sets `ticker_tape=160`, which keeps provider watermarks and score bugs out of the logo search; without it Comskip found nothing on a Sky Sports feed. |
-| Detect while recording | on | Needs the patched Comskip. |
+| Detect while recording | on | Needs the Comseg build of Comskip. |
 | Full pass on finished recordings | on | Also what the Media Segment Scan runs. |
 | Live analysis interval | 60 s | `live_master_interval`. |
 | Analyses before a break is published | 2 | Drops the one-off false breaks sports feeds produce. |

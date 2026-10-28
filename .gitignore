@@ -4,3 +4,4 @@ artifacts/
 *.user
 dist/
 .plugin-guid
+comskip/build/
