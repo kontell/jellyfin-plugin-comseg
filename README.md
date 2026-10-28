@@ -44,5 +44,3 @@ tools/package.sh            # dist/comseg_<version>.zip
 ```
 
 Releases are versioned `12.0.0.N` with `targetAbi 12.0.0.0`, built for net10.0 against the oldest Jellyfin 12 package.
-
-The feasibility study that shaped this is in [`docs/feasibility-comskip-2026-10-27.md`](docs/feasibility-comskip-2026-10-27.md).
