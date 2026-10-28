@@ -3,7 +3,7 @@
   <PropertyGroup>
     <!-- Follows the ABI row being built; see the plugin csproj for why the
          override is JellyfinFramework and not TargetFramework. -->
-    <JellyfinFramework Condition="'$(JellyfinFramework)' == ''">net9.0</JellyfinFramework>
+    <JellyfinFramework Condition="'$(JellyfinFramework)' == ''">net10.0</JellyfinFramework>
     <TargetFramework>$(JellyfinFramework)</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>disable</ImplicitUsings>

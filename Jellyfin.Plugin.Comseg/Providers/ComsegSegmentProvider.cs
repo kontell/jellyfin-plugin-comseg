@@ -129,9 +129,8 @@ public sealed class ComsegSegmentProvider : IMediaSegmentProvider
     }
 
     /// <summary>
-    /// Jellyfin 12 asks providers to drop per-item data when an item's
-    /// segments are deleted. Comseg keeps none after a pass finishes. (Not an
-    /// interface member on 10.11, where it is simply an unused method.)
+    /// Jellyfin asks providers to drop per-item data when an item's segments
+    /// are deleted. Comseg keeps none after a pass finishes.
     /// </summary>
     /// <param name="itemId">The item.</param>
     /// <param name="cancellationToken">Cancellation.</param>

@@ -2,14 +2,10 @@
 # the pvr.kofin build/release split: this file is the every-PR gate, release.yml
 # handles tags.
 #
-# This repo had no PR gate at all until now: release.yml fires on a tag and
-# notify-repo.yml on a publish, so nothing checked a branch. Both ABI rows are
-# built here — a gate that only checks the line you happen to run is not a gate,
-# and the sibling plugin proved that the hard way when a -p:TargetFramework
-# override that MSBuild strips before restore got as far as a merge.
-#
-# The ABI rows come from abis.yml, shared with release.yml, so the gate and the
-# release cannot disagree about what is supported.
+# The supported Jellyfin line comes from abis.yml, shared with release.yml, so
+# the gate and the release cannot disagree about what is built; the row's
+# framework is passed as -p:JellyfinFramework because a -p:TargetFramework
+# override is stripped by MSBuild before restore.
 name: CI
 
 on:

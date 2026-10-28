@@ -3,11 +3,8 @@
 # Same job shape and the same draft-not-publish stance as
 # jellyfin-plugin-syncplayv2's, so both server plugins release identically.
 #
-# One source tree, several server lines. Jellyfin serves one manifest.json in
-# which each entry carries its own targetAbi and the server self-selects, so
-# supporting 10.11 and 12 is a build matrix rather than a branch pair — the
-# whole divergence is the target framework, the package pin and the version
-# prefix. The row list lives in abis.yml, shared with ci.yml.
+# The supported Jellyfin line lives in abis.yml, shared with ci.yml. The matrix
+# shape stays so that a further server line is a row there, not a branch.
 #
 # Draft, deliberately. Publishing is what repository.kontell reacts to
 # (notify-repo.yml), so a release stays a draft until a human has looked at the
@@ -82,11 +79,9 @@ jobs:
           FRAMEWORK: ${{ matrix.row.framework }}
           JELLYFIN_VERSION: ${{ matrix.row.jellyfin }}
 
-      # The csproj's PluginVersion is the single source of version truth: every
-      # row's version is <its base>.<that build number>, so the rows stay in
-      # lockstep and a v12 server always ranks the v12 zip above the 10.11 one.
-      # build.yaml documents the primary row, so it must agree or the manifest
-      # and the release notes would describe different builds.
+      # The csproj's PluginVersion is the single source of version truth, and
+      # build.yaml documents it, so the two must agree or the manifest and the
+      # release notes would describe different builds.
       - name: Assert the primary row, build.yaml and the tag all agree
         if: matrix.row.primary
         shell: bash
