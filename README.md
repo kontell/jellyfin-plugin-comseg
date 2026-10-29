@@ -16,13 +16,14 @@ Dashboard → Plugins → Comseg.
 | Setting | Default | |
 | --- | --- | --- |
 | Comskip executable | `comskip` | Path or a name on the server's PATH. "Check Comskip" runs it. |
-| Comskip ini | built-in | The built-in ini sets `ticker_tape=160`, which keeps provider watermarks and score bugs out of the logo search. |
+| Comskip ini | built-in | Path of a comskip.ini of your own, anywhere the server can read; blank uses the built-in one, which sets `ticker_tape=160` to keep provider watermarks and score bugs out of the logo search. If the server finds no file at the path, runs use the built-in one; "Check Comskip" says which one they use. Whichever file is used, the plugin sets `live_tv`, `live_master_interval`, `live_tv_retries`, `output_edl`, `output_default` and `thread_count` itself, from its own settings where it has one. |
 | Detect while recording | on | Needs the Comseg build of Comskip. |
 | Full pass on finished recordings | on | Also what the Media Segment Scan runs. |
 | Live analysis interval | 60 s | `live_master_interval`. |
 | Analyses before a break is published | 2 | Drops the one-off false breaks sports feeds produce. |
 | Shortest break published | 20 s | |
-| Recordings analysed live at once | 2 | A live Comskip costs about a core at real-time pace. |
+| Recordings analysed live at once | 2 | A live Comskip costs about a third of a core at real-time pace, and holds per-frame data for the whole recording, about 700 MB by the end of a four-hour one. |
+| Extra recording folders | none | Folders outside Jellyfin's own recording paths whose videos count as recordings, separated by semicolons. |
 
 Jellyfin's own per-library setting *Disabled media segment providers* can turn the provider off for a library; the plugin's rows are read only while the provider is enabled there.
 
