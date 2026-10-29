@@ -41,6 +41,12 @@ public class PluginConfiguration : BasePluginConfiguration
     /// <summary>Gets or sets how many recordings may be analysed live at once.</summary>
     public int MaxConcurrentLive { get; set; } = 2;
 
+    /// <summary>Gets or sets the picture height Comskip analyses at: 0 analyses recordings as they are; 720 or 480 analyses a copy scaled down on the GPU (VA-API) whenever the recording is taller.</summary>
+    public int AnalysisHeight { get; set; }
+
+    /// <summary>Gets or sets the VA-API render device that makes the scaled copy.</summary>
+    public string VaapiDevice { get; set; } = "/dev/dri/renderD128";
+
     /// <summary>Gets or sets Comskip's decoder thread count.</summary>
     public int ThreadCount { get; set; } = 4;
 

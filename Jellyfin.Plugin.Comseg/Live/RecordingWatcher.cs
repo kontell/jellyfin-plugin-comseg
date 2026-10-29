@@ -59,6 +59,7 @@ public sealed class RecordingWatcher : BackgroundService
     private readonly IProviderManager _providers;
     private readonly IFileSystem _fileSystem;
     private readonly ComskipRunner _runner;
+    private readonly ScaledCopy _copies;
     private readonly CompletedPass _pass;
     private readonly SegmentStore _store;
     private readonly Workspace _workspace;
@@ -77,6 +78,7 @@ public sealed class RecordingWatcher : BackgroundService
     /// <param name="providers">The provider manager, for library refreshes.</param>
     /// <param name="fileSystem">The file system.</param>
     /// <param name="runner">The Comskip runner.</param>
+    /// <param name="copies">The scaled copies.</param>
     /// <param name="pass">The full-pass runner.</param>
     /// <param name="store">The segment store.</param>
     /// <param name="workspace">The workspace.</param>
@@ -89,6 +91,7 @@ public sealed class RecordingWatcher : BackgroundService
         IProviderManager providers,
         IFileSystem fileSystem,
         ComskipRunner runner,
+        ScaledCopy copies,
         CompletedPass pass,
         SegmentStore store,
         Workspace workspace,
@@ -101,6 +104,7 @@ public sealed class RecordingWatcher : BackgroundService
         _providers = providers;
         _fileSystem = fileSystem;
         _runner = runner;
+        _copies = copies;
         _pass = pass;
         _store = store;
         _workspace = workspace;
@@ -217,6 +221,7 @@ public sealed class RecordingWatcher : BackgroundService
             foreach (var job in _jobs.Values)
             {
                 job.Process?.Dispose();
+                job.Copy?.Dispose();
             }
         }
     }
@@ -449,6 +454,17 @@ public sealed class RecordingWatcher : BackgroundService
     /// <summary>Starts the live Comskip, or restarts it (twice at most) when it exited while the recording still runs.</summary>
     private async Task StartComskipAsync(LiveJob job, PluginConfiguration config, CancellationToken cancellationToken)
     {
+        if (job.Copy is { HasExited: true } stopped)
+        {
+            // A copy that stopped while the recording still runs leaves Comskip
+            // waiting for frames that never come: read the recording from here on.
+            _logger.LogWarning("Comseg: the scaled copy of {Path} stopped (code {Code}); analysing the recording itself. {Tail}", job.Path, stopped.ExitCode, stopped.Tail);
+            job.LastError = "the scaled copy stopped; analysing the recording itself";
+            DropCopy(job);
+            job.Process?.Dispose();
+            job.Process = null;
+        }
+
         if (job.Process is { } current && (!current.HasExited || job.Restarts >= 2))
         {
             return;
@@ -462,17 +478,101 @@ public sealed class RecordingWatcher : BackgroundService
             job.Restarts++;
         }
 
+        var input = await LiveInputAsync(job, config, cancellationToken).ConfigureAwait(false);
+        if (input is null)
+        {
+            return;
+        }
+
         Directory.CreateDirectory(job.WorkDir);
         var iniPath = Path.Combine(job.WorkDir, "live.ini");
         await File.WriteAllTextAsync(
             iniPath,
             ComskipIni.Compose(ComskipIni.BaseText(config.IniPath), ComskipIni.LiveOverrides(config)),
             cancellationToken).ConfigureAwait(false);
-        job.Process = _runner.StartLive(config.ComskipPath, iniPath, job.WorkDir, job.Path);
+        job.Process = _runner.StartLive(config.ComskipPath, iniPath, job.WorkDir, input);
         if (job.Process is null)
         {
             job.LastError = "Comskip could not be started; check the configured path";
         }
+    }
+
+    /// <summary>
+    /// The file the live Comskip reads: when the settings ask for a scaled copy
+    /// and the recording is taller, a copy the GPU makes as the recording grows,
+    /// else the recording itself. Null while the copy is starting and has no
+    /// picture yet.
+    /// </summary>
+    private async Task<string?> LiveInputAsync(LiveJob job, PluginConfiguration config, CancellationToken cancellationToken)
+    {
+        var height = ScaledCopy.Height(config);
+        if (job.Direct || height == 0)
+        {
+            return job.Path;
+        }
+
+        if (job.Copy is null)
+        {
+            var source = await _copies.ProbeAsync(job.Path, cancellationToken).ConfigureAwait(false);
+            if (source is null && ++job.ProbeAttempts < 4)
+            {
+                return null; // the recording's first picture may not be readable yet
+            }
+
+            if (source is null || source.Height <= height)
+            {
+                if (source is null)
+                {
+                    _logger.LogWarning("Comseg: no picture size for {Path}; analysing the recording itself", job.Path);
+                }
+
+                job.Direct = true;
+                return job.Path;
+            }
+
+            job.CopyPath = Path.Combine(job.WorkDir, "copy.ts");
+            job.Copy = _copies.StartFollowing(job.Path, job.CopyPath, height, config);
+            job.CopyStartedUtc = DateTime.UtcNow;
+            if (job.Copy is null)
+            {
+                job.LastError = "the scaled copy could not be started; analysing the recording itself";
+                DropCopy(job);
+                return job.Path;
+            }
+
+            job.CopyHeight = height;
+            return null;
+        }
+
+        if (!job.CopyReady)
+        {
+            if (!FileReady(job.CopyPath!))
+            {
+                if (DateTime.UtcNow - job.CopyStartedUtc < TimeSpan.FromMinutes(2))
+                {
+                    return null;
+                }
+
+                _logger.LogWarning("Comseg: the scaled copy of {Path} has written nothing in two minutes; analysing the recording itself. {Tail}", job.Path, job.Copy.Tail);
+                job.LastError = "the scaled copy wrote nothing; analysing the recording itself";
+                DropCopy(job);
+                return job.Path;
+            }
+
+            job.CopyReady = true;
+            _logger.LogInformation("Comseg: analysing a {Height}p copy of {Path} made on the GPU", height, job.Path);
+        }
+
+        return job.CopyPath;
+    }
+
+    /// <summary>Stops a job's scaled copy for good; the live Comskip reads the recording from then on.</summary>
+    private static void DropCopy(LiveJob job)
+    {
+        job.Copy?.Dispose();
+        job.Copy = null;
+        job.CopyHeight = null;
+        job.Direct = true;
     }
 
     /// <summary>Reads the patched Comskip's periodic analysis when it has written a new one, and feeds it to the tracker.</summary>
@@ -674,10 +774,13 @@ public sealed class RecordingWatcher : BackgroundService
                 return;
             }
 
+            // Waiting for the copy only waits on the GPU, so it stays outside the
+            // one-at-a-time final passes.
+            var copy = await FinishCopyAsync(job, cancellationToken).ConfigureAwait(false);
             await _finalizations.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
-                var breaks = await _pass.RunAsync(job.Path, config, cancellationToken).ConfigureAwait(false);
+                var breaks = await _pass.RunAsync(job.Path, config, cancellationToken, copy).ConfigureAwait(false);
                 if (breaks is null)
                 {
                     _logger.LogWarning("Comseg: final pass over {Path} produced nothing; the live breaks stand", job.Path);
@@ -707,10 +810,37 @@ public sealed class RecordingWatcher : BackgroundService
         finally
         {
             job.Process?.Dispose();
+            job.Copy?.Dispose();
             Workspace.TryDelete(job.WorkDir);
 
             // The pass is over: on-demand detection and the scan may have the item.
             job.Release(_registry);
         }
+    }
+
+    /// <summary>
+    /// The live job's scaled copy, finished, for the final pass: the copy
+    /// reads to the recording's end and waits there, so once its file stops
+    /// growing it has caught up. Null when the job read the recording itself
+    /// or the copy falls short of the recording; the final pass then makes
+    /// its own copy, or reads the recording.
+    /// </summary>
+    private async Task<string?> FinishCopyAsync(LiveJob job, CancellationToken cancellationToken)
+    {
+        if (job.Copy is not { } copy || job.CopyPath is not { } path || !job.CopyReady)
+        {
+            return null;
+        }
+
+        await copy.FinishAsync(TimeSpan.FromMinutes(10), cancellationToken).ConfigureAwait(false);
+        var recording = await _copies.ProbeAsync(job.Path, cancellationToken).ConfigureAwait(false);
+        var scaled = await _copies.ProbeAsync(path, cancellationToken).ConfigureAwait(false);
+        if (recording is null || scaled is null || scaled.Duration < recording.Duration - 10)
+        {
+            _logger.LogWarning("Comseg: the scaled copy of {Path} stops short of the recording; the final pass starts afresh", job.Path);
+            return null;
+        }
+
+        return path;
     }
 }
