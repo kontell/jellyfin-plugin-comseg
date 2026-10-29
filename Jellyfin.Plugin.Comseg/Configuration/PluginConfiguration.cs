@@ -26,7 +26,7 @@ public class PluginConfiguration : BasePluginConfiguration
     /// <summary>Gets or sets how often (seconds) in-progress recordings are polled for.</summary>
     public int PollSeconds { get; set; } = 15;
 
-    /// <summary>Gets or sets how many seconds of content pass between full analyses of a recording in progress (the patched Comskip's live_master_interval).</summary>
+    /// <summary>Gets or sets how many seconds of content pass between the patched Comskip's break-finding passes over a recording in progress (live_master_interval); each pass reuses the frames already decoded.</summary>
     public int LiveMasterIntervalSeconds { get; set; } = 60;
 
     /// <summary>Gets or sets Comskip's live_tv_retries: how many 4 s waits for new data before it gives up on a stalled recording.</summary>
