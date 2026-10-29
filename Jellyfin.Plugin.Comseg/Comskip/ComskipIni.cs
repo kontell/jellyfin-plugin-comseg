@@ -30,7 +30,7 @@ public static class ComskipIni
         return reader.ReadToEnd();
     }
 
-    /// <summary>The base ini text: the configured file when set and readable, else the embedded default.</summary>
+    /// <summary>The base ini text: the configured file when set and present, else the embedded default. A file that is there but cannot be read throws.</summary>
     /// <param name="configuredPath">The configured ini path, possibly empty.</param>
     /// <returns>The base ini text.</returns>
     public static string BaseText(string configuredPath)
@@ -41,6 +41,37 @@ public static class ComskipIni
         }
 
         return DefaultText();
+    }
+
+    /// <summary>
+    /// Which ini runs start from, as a sentence for the Comskip check: a path
+    /// the server cannot find falls back to the built-in ini without failing,
+    /// so the check is where an admin learns it did.
+    /// </summary>
+    /// <param name="configuredPath">The configured ini path, possibly empty.</param>
+    /// <returns>The sentence.</returns>
+    public static string Describe(string configuredPath)
+    {
+        if (string.IsNullOrWhiteSpace(configuredPath))
+        {
+            return "Ini: the built-in one.";
+        }
+
+        if (!File.Exists(configuredPath))
+        {
+            return "Ini: the server finds no file at " + configuredPath + ", so runs use the built-in one.";
+        }
+
+        try
+        {
+            using var stream = File.OpenRead(configuredPath);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return "Ini: " + configuredPath + " cannot be read (" + ex.Message + "), so runs fail until it can.";
+        }
+
+        return "Ini: " + configuredPath + ".";
     }
 
     /// <summary>The keys for a run against a recording that is still being written.</summary>

@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.IO;
 using Jellyfin.Plugin.Comseg.Comskip;
 using Jellyfin.Plugin.Comseg.Configuration;
 using Xunit;
@@ -29,6 +30,23 @@ public class ComskipIniTests
         Assert.Contains("[Main Settings]", composed);
         Assert.Contains("detect_method=123", composed);
         Assert.Contains("output_edl=1", composed);
+    }
+
+    [Fact]
+    public void TheCheckSaysWhenAConfiguredIniIsNotThere()
+    {
+        Assert.Equal("Ini: the built-in one.", ComskipIni.Describe(string.Empty));
+        var missing = Path.Combine(Path.GetTempPath(), "comseg-no-such-dir", "comskip.ini");
+        Assert.Equal("Ini: the server finds no file at " + missing + ", so runs use the built-in one.", ComskipIni.Describe(missing));
+        var present = Path.GetTempFileName();
+        try
+        {
+            Assert.Equal("Ini: " + present + ".", ComskipIni.Describe(present));
+        }
+        finally
+        {
+            File.Delete(present);
+        }
     }
 
     [Fact]
