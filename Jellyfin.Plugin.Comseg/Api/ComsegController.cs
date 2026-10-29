@@ -78,15 +78,16 @@ public class ComsegController : ControllerBase
         return new StatusResponse { ComskipPath = ComsegPlugin.Config.ComskipPath, ProviderId = Providers.ComsegSegmentProvider.ProviderId, Jobs = jobs };
     }
 
-    /// <summary>Runs the configured Comskip with --help to prove the path works.</summary>
+    /// <summary>Runs the configured Comskip with --help to prove the path works, and says which ini runs start from.</summary>
     /// <param name="cancellationToken">Cancellation.</param>
-    /// <returns>The banner, or the error.</returns>
+    /// <returns>The banner, or the error, and the ini.</returns>
     [HttpPost("Check")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<ActionResult<CheckResponse>> Check(CancellationToken cancellationToken)
     {
-        var (ok, text) = await _runner.ProbeAsync(ComsegPlugin.Config.ComskipPath, cancellationToken).ConfigureAwait(false);
-        return new CheckResponse { Ok = ok, Text = text };
+        var config = ComsegPlugin.Config;
+        var (ok, text) = await _runner.ProbeAsync(config.ComskipPath, cancellationToken).ConfigureAwait(false);
+        return new CheckResponse { Ok = ok, Text = text, Ini = ComskipIni.Describe(config.IniPath) };
     }
 
     /// <summary>Runs a full pass over a finished recording in the background, replacing its rows.</summary>
@@ -188,5 +189,8 @@ public class ComsegController : ControllerBase
 
         /// <summary>Gets or sets the banner or error.</summary>
         public string Text { get; set; } = string.Empty;
+
+        /// <summary>Gets or sets which ini runs start from.</summary>
+        public string Ini { get; set; } = string.Empty;
     }
 }

@@ -29,7 +29,7 @@
                     </div>
                     <div class="inputContainer">
                         <input is="emby-input" type="text" id="txtIniPath" label="Comskip ini (optional)" />
-                        <div class="fieldDescription">A comskip.ini to use instead of the built-in one. The plugin always sets the run-mode keys itself.</div>
+                        <div class="fieldDescription">A comskip.ini on the server to use instead of the built-in one; Check Comskip says which one runs use. The plugin always sets the run-mode keys itself.</div>
                     </div>
                     <div class="inputContainer">
                         <input is="emby-input" type="text" id="txtWorkDirectory" label="Work directory (optional)" />
@@ -161,7 +161,7 @@
                 var out = document.querySelector('#checkResult');
                 out.textContent = 'Running…';
                 ApiClient.ajax({ type: 'POST', url: ApiClient.getUrl('Comseg/Check'), dataType: 'json' }).then(function (r) {
-                    out.textContent = (r.Ok ? 'OK: ' : 'Failed: ') + r.Text;
+                    out.innerHTML = escapeHtml((r.Ok ? 'OK: ' : 'Failed: ') + r.Text) + (r.Ini ? '<br />' + escapeHtml(r.Ini) : '');
                 }).catch(function () {
                     out.textContent = 'The check request failed.';
                 });
