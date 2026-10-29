@@ -25,6 +25,11 @@ namespace Jellyfin.Plugin.Comseg.Comskip;
 /// in the recording: on a 3 h 40 min game all 27 breaks matched, most of
 /// their starts to the hundredth of a second.
 ///
+/// An HDR recording's copy is tone mapped to SDR as well, the way Jellyfin
+/// does it on AMD: through Vulkan, with libplacebo. Comskip reads an HDR
+/// picture as if it were SDR, flat and dim, and on a UHD game it found the
+/// channel logo in too few frames to use it, so it found no breaks at all.
+///
 /// Jellyfin's media encoder is resolved per call: the full pass that uses
 /// this class belongs to the segment provider, which must not take
 /// Jellyfin's managers in its constructor graph.
@@ -69,19 +74,20 @@ public sealed class ScaledCopy
     /// <param name="source">The recording.</param>
     /// <param name="copy">The copy to write.</param>
     /// <param name="height">The height to scale to.</param>
+    /// <param name="hdr">Whether the recording is HDR, to be tone mapped.</param>
     /// <param name="config">The plugin configuration.</param>
     /// <returns>The running copy, or null when ffmpeg could not be started.</returns>
-    public Following? StartFollowing(string source, string copy, int height, PluginConfiguration config)
+    public Following? StartFollowing(string source, string copy, int height, bool hdr, PluginConfiguration config)
     {
         var stall = TimeSpan.FromSeconds(4.0 * Math.Clamp(config.LiveTvRetries, 1, 100000));
-        var process = Start(source, copy, height, config, stall, out var tail);
+        var process = Start(source, copy, height, hdr, config, stall, out var tail);
         return process is null ? null : new Following(process, tail, copy);
     }
 
     /// <summary>
     /// Copies a finished recording when a copy is wanted and the recording is
-    /// taller than the height asked for; null when the recording is to be
-    /// analysed as it is, including when the copy fails.
+    /// taller than the height asked for, or HDR; null when the recording is to
+    /// be analysed as it is, including when the copy fails.
     /// </summary>
     /// <param name="source">The recording.</param>
     /// <param name="copy">The copy to write.</param>
@@ -98,13 +104,13 @@ public sealed class ScaledCopy
         }
 
         var original = await ProbeAsync(source, true, cancellationToken).ConfigureAwait(false);
-        if (original is null || original.Height <= height)
+        if (original is null || (original.Height <= height && !original.Hdr))
         {
             return null;
         }
 
         var started = DateTime.UtcNow;
-        using var process = Start(source, copy, height, config, null, out var tail);
+        using var process = Start(source, copy, height, original.Hdr, config, null, out var tail);
         if (process is null)
         {
             return null;
@@ -135,11 +141,19 @@ public sealed class ScaledCopy
             return null;
         }
 
-        _logger.LogInformation("Comseg: made a {Height}p copy of {Media} on the GPU in {Elapsed:mm\\:ss}", height, source, DateTime.UtcNow - started);
+        if (original.Hdr)
+        {
+            _logger.LogInformation("Comseg: made a {Height}p copy of {Media} on the GPU, tone mapped from HDR, in {Elapsed:mm\\:ss}", height, source, DateTime.UtcNow - started);
+        }
+        else
+        {
+            _logger.LogInformation("Comseg: made a {Height}p copy of {Media} on the GPU in {Elapsed:mm\\:ss}", height, source, DateTime.UtcNow - started);
+        }
+
         return copy;
     }
 
-    /// <summary>A file's picture height, and its duration when asked, through Jellyfin's ffprobe.</summary>
+    /// <summary>A file's picture height and dynamic range, and its duration when asked, through Jellyfin's ffprobe.</summary>
     /// <param name="path">The file.</param>
     /// <param name="duration">Whether to read the duration too, which seeks to the end of the file: pointless on a recording still being written.</param>
     /// <param name="cancellationToken">Cancellation.</param>
@@ -154,7 +168,7 @@ public sealed class ScaledCopy
             RedirectStandardError = true,
             CreateNoWindow = true,
         };
-        foreach (var arg in new[] { "-v", "error", "-select_streams", "v:0", "-show_entries", duration ? "stream=height:format=duration" : "stream=height", "-of", "default=nw=1", path })
+        foreach (var arg in new[] { "-v", "error", "-select_streams", "v:0", "-show_entries", duration ? "stream=height,color_transfer:format=duration" : "stream=height,color_transfer", "-of", "default=nw=1", path })
         {
             info.ArgumentList.Add(arg);
         }
@@ -188,6 +202,7 @@ public sealed class ScaledCopy
 
         var seconds = 0.0;
         var height = 0;
+        var hdr = false;
         foreach (var line in output.Split('\n'))
         {
             var eq = line.IndexOf('=', StringComparison.Ordinal);
@@ -207,10 +222,14 @@ public sealed class ScaledCopy
                     // N/A, for a duration ffprobe could not find, parses as 0: unknown
                     double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out seconds);
                     break;
+                case "color_transfer":
+                    // PQ, as in HDR10, or HLG
+                    hdr = value is "smpte2084" or "arib-std-b67";
+                    break;
             }
         }
 
-        return height == 0 ? null : new Probe(height, seconds);
+        return height == 0 ? null : new Probe(height, seconds, hdr);
     }
 
     /// <summary>The ffmpeg arguments for a copy.</summary>
@@ -219,8 +238,9 @@ public sealed class ScaledCopy
     /// <param name="height">The height to scale to; a smaller picture is not scaled up.</param>
     /// <param name="device">The VA-API render device.</param>
     /// <param name="follow">For a file still being written, how long to wait at its end for more; null for a finished file.</param>
+    /// <param name="hdr">Whether the recording is HDR, to be tone mapped to SDR.</param>
     /// <returns>The arguments.</returns>
-    internal static IReadOnlyList<string> Arguments(string source, string copy, int height, string device, TimeSpan? follow)
+    internal static IReadOnlyList<string> Arguments(string source, string copy, int height, string device, TimeSpan? follow, bool hdr)
     {
         var args = new List<string> { "-nostdin", "-hide_banner", "-v", "error", "-y" };
         if (follow is { } wait)
@@ -229,12 +249,33 @@ public sealed class ScaledCopy
             args.AddRange(new[] { "-follow", "1", "-rw_timeout", ((long)wait.TotalMicroseconds).ToString(CultureInfo.InvariantCulture) });
         }
 
+        var scale = string.Format(CultureInfo.InvariantCulture, "scale_vaapi=w=-2:h='min({0},ih)'", height);
+        string filter;
+        if (hdr)
+        {
+            // Jellyfin's tone mapping on AMD: the scaled frames, still 10-bit, reach
+            // libplacebo on Vulkan by way of DRM, and go back to VA-API to be encoded.
+            args.AddRange(new[]
+            {
+                "-init_hw_device", "drm=dr:" + device, "-init_hw_device", "vaapi=va@dr", "-init_hw_device", "vulkan=vk@dr",
+                "-filter_hw_device", "vk",
+                "-hwaccel", "vaapi", "-hwaccel_device", "va", "-hwaccel_output_format", "vaapi",
+            });
+            filter = scale + ":format=p010,hwmap=derive_device=drm,format=drm_prime,"
+                + "libplacebo=format=bgra:tonemapping=bt.2390:peak_detect=0:color_primaries=bt709:color_trc=bt709:colorspace=bt709,"
+                + "format=vulkan,hwmap=derive_device=vaapi,format=vaapi,scale_vaapi=format=nv12";
+        }
+        else
+        {
+            args.AddRange(new[] { "-hwaccel", "vaapi", "-hwaccel_device", device, "-hwaccel_output_format", "vaapi" });
+            filter = scale + ":format=nv12";
+        }
+
         args.AddRange(new[]
         {
-            "-hwaccel", "vaapi", "-hwaccel_device", device, "-hwaccel_output_format", "vaapi",
             "-i", source,
             "-map", "0:v:0", "-map", "0:a?",
-            "-vf", string.Format(CultureInfo.InvariantCulture, "scale_vaapi=w=-2:h='min({0},ih)':format=nv12", height),
+            "-vf", filter,
             // A coarse encode: at 720p about 2.8 Mbit/s on a sports feed, and finer
             // ones found the same breaks in a larger file.
             "-c:v", "h264_vaapi", "-qp", "30",
@@ -245,7 +286,7 @@ public sealed class ScaledCopy
         return args;
     }
 
-    private Process? Start(string source, string copy, int height, PluginConfiguration config, TimeSpan? follow, out OutputTail tail)
+    private Process? Start(string source, string copy, int height, bool hdr, PluginConfiguration config, TimeSpan? follow, out OutputTail tail)
     {
         tail = new OutputTail();
         var info = new ProcessStartInfo
@@ -257,7 +298,7 @@ public sealed class ScaledCopy
             CreateNoWindow = true,
         };
         var device = string.IsNullOrWhiteSpace(config.VaapiDevice) ? "/dev/dri/renderD128" : config.VaapiDevice.Trim();
-        foreach (var arg in Arguments(source, copy, height, device, follow))
+        foreach (var arg in Arguments(source, copy, height, device, follow, hdr))
         {
             info.ArgumentList.Add(arg);
         }
@@ -282,10 +323,11 @@ public sealed class ScaledCopy
         }
     }
 
-    /// <summary>A file's picture height and duration.</summary>
+    /// <summary>A file's picture height, duration and dynamic range.</summary>
     /// <param name="Height">The picture height.</param>
     /// <param name="Duration">The duration, seconds; 0 when unknown.</param>
-    public sealed record Probe(int Height, double Duration);
+    /// <param name="Hdr">Whether the picture is HDR: PQ or HLG.</param>
+    public sealed record Probe(int Height, double Duration, bool Hdr = false);
 
     /// <summary>A copy being made from a recording still being written.</summary>
     public sealed class Following : IDisposable
