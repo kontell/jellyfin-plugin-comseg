@@ -13,7 +13,7 @@
     <TargetFramework>$(JellyfinFramework)</TargetFramework>
     <!-- <server major.minor>.0.<build>: Jellyfin treats targetAbi as a floor
          (jellyfin#11331), so the version says which line a zip is for. -->
-    <PluginVersion Condition="'$(PluginVersion)' == ''">12.0.0.1</PluginVersion>
+    <PluginVersion Condition="'$(PluginVersion)' == ''">12.0.0.2</PluginVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>disable</ImplicitUsings>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
