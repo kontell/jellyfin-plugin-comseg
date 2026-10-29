@@ -144,6 +144,7 @@
                             + (j.ItemId ? '' : ', no library item yet')
                             + (j.ProcessRunning ? ', Comskip running' : ', Comskip not running')
                             + (j.Finalizing ? ', finishing' : '')
+                            + (j.Finished ? ', finished; keeping the breaks in place until Jellyfin has refreshed the closed file' : '')
                             + (j.LastError ? ', ' + escapeHtml(j.LastError) : '')
                             + '</li>';
                     });

@@ -73,7 +73,8 @@ public class ComsegController : ControllerBase
             Published = j.Published,
             ProcessRunning = j.Process is not null && !j.Process.HasExited,
             Finalizing = j.Finalizing,
-            LastError = j.LastError,
+            Finished = j.Finished,
+            LastError = Problems(j),
         }).ToList();
         return new StatusResponse { ComskipPath = ComsegPlugin.Config.ComskipPath, ProviderId = Providers.ComsegSegmentProvider.ProviderId, Jobs = jobs };
     }
@@ -109,15 +110,18 @@ public class ComsegController : ControllerBase
             return Conflict("a detection is already running for this item");
         }
 
+        // A finished live job may still be keeping its breaks in place; this
+        // pass replaces them.
+        _watcher.StandDown(item.Id);
         var config = ComsegPlugin.Config;
         _ = Task.Run(async () =>
         {
             try
             {
                 var breaks = await _pass.RunAsync(item.Path, config, CancellationToken.None).ConfigureAwait(false);
-                if (breaks is not null)
+                if (breaks is not null && await _store.PublishAsync(item, breaks, "on demand", final: true).ConfigureAwait(false) == 0)
                 {
-                    await _store.ReplaceAsync(item, breaks).ConfigureAwait(false);
+                    _logger.LogInformation("Comseg: the on-demand pass over {Name} agrees with the stored breaks", item.Name);
                 }
             }
             catch (Exception ex)
@@ -127,11 +131,18 @@ public class ComsegController : ControllerBase
             finally
             {
                 _registry.Exit(item.Id);
-                _store.Forget(item.Id);
             }
         });
         return Accepted();
     }
+
+    /// <summary>A job's problems for the status page: storing the breaks first, then Comskip.</summary>
+    private static string? Problems(LiveJob job) => (job.StoreError, job.LastError) switch
+    {
+        (null, var comskip) => comskip,
+        (var store, null) => store,
+        (var store, var comskip) => store + "; " + comskip,
+    };
 
     /// <summary>The status response.</summary>
     public sealed class StatusResponse
@@ -167,16 +178,19 @@ public class ComsegController : ControllerBase
         /// <summary>Gets or sets how many breaks the analyses agree on so far.</summary>
         public int Confirmed { get; set; }
 
-        /// <summary>Gets or sets how many breaks are published (needs the recording's library item).</summary>
+        /// <summary>Gets or sets how many breaks are stored in Jellyfin (needs the recording's library item).</summary>
         public int Published { get; set; }
 
         /// <summary>Gets or sets a value indicating whether Comskip is running.</summary>
         public bool ProcessRunning { get; set; }
 
-        /// <summary>Gets or sets a value indicating whether the final pass is running.</summary>
+        /// <summary>Gets or sets a value indicating whether the recording ended and its final pass is running.</summary>
         public bool Finalizing { get; set; }
 
-        /// <summary>Gets or sets the last problem.</summary>
+        /// <summary>Gets or sets a value indicating whether the final pass is over and the job only keeps the breaks in place until Jellyfin's refresh of the closed file.</summary>
+        public bool Finished { get; set; }
+
+        /// <summary>Gets or sets the last problem: storing the breaks, then Comskip.</summary>
         public string? LastError { get; set; }
     }
 

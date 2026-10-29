@@ -11,9 +11,9 @@ public class LiveBreakTrackerTests
     public void ABreakIsPublishedOnlyAfterTheConfirmingPass()
     {
         var tracker = new LiveBreakTracker(2, 20);
-        Assert.False(tracker.Observe(new List<Break> { new(100, 160) }));
+        tracker.Observe(new List<Break> { new(100, 160) });
         Assert.Empty(tracker.Confirmed);
-        Assert.True(tracker.Observe(new List<Break> { new(100, 220) }));
+        tracker.Observe(new List<Break> { new(100, 220) });
         var b = Assert.Single(tracker.Confirmed);
         Assert.Equal(100, b.Start);
         Assert.Equal(220, b.End);
@@ -35,9 +35,8 @@ public class LiveBreakTrackerTests
         var tracker = new LiveBreakTracker(2, 20);
         tracker.Observe(new List<Break> { new(100, 160) });
         tracker.Observe(new List<Break> { new(100, 220) });
-        Assert.True(tracker.Observe(new List<Break> { new(100, 280) }));
-        Assert.Equal(280, tracker.Confirmed[0].End);
-        Assert.False(tracker.Observe(new List<Break> { new(100, 280) }));
+        tracker.Observe(new List<Break> { new(100, 280) });
+        Assert.Equal(280, Assert.Single(tracker.Confirmed).End);
     }
 
     [Fact]
@@ -66,9 +65,9 @@ public class LiveBreakTrackerTests
         tracker.Observe(new List<Break> { new(100, 220) });
         tracker.Observe(new List<Break> { new(100, 220) });
         Assert.Single(tracker.Confirmed);
-        Assert.False(tracker.Observe(new List<Break>()));
+        tracker.Observe(new List<Break>());
         Assert.Single(tracker.Confirmed);
-        Assert.True(tracker.Observe(new List<Break>()));
+        tracker.Observe(new List<Break>());
         Assert.Empty(tracker.Confirmed);
     }
 
@@ -79,7 +78,7 @@ public class LiveBreakTrackerTests
         tracker.Observe(new List<Break> { new(100, 220) });
         tracker.Observe(new List<Break> { new(100, 220) });
         tracker.Observe(new List<Break>());
-        Assert.False(tracker.Observe(new List<Break> { new(100, 220) }));
+        tracker.Observe(new List<Break> { new(100, 220) });
         Assert.Single(tracker.Confirmed);
     }
 
