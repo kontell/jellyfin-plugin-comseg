@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using Jellyfin.Plugin.Comseg.Comskip;
 using Jellyfin.Plugin.Comseg.Configuration;
 using Jellyfin.Plugin.Comseg.Edl;
+using Jellyfin.Plugin.Comseg.Providers;
 using Jellyfin.Plugin.Comseg.Segments;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
@@ -65,6 +66,9 @@ public sealed class RecordingWatcher : BackgroundService
     private readonly ILogger<RecordingWatcher> _logger;
     private readonly ConcurrentDictionary<string, LiveJob> _jobs = new(StringComparer.Ordinal);
     private readonly SemaphoreSlim _finalizations = new(1, 1);
+
+    /// <summary>Recordings in progress left alone because their library disables the provider; the poll loop's own.</summary>
+    private readonly HashSet<string> _optedOut = new(StringComparer.Ordinal);
 
     /// <summary>Initializes a new instance of the <see cref="RecordingWatcher"/> class.</summary>
     /// <param name="liveTv">The Live TV manager.</param>
@@ -232,6 +236,7 @@ public sealed class RecordingWatcher : BackgroundService
     private async Task PollOnceAsync(PluginConfiguration config, CancellationToken cancellationToken)
     {
         var active = await ActivePathsAsync(cancellationToken).ConfigureAwait(false);
+        _optedOut.IntersectWith(active);
 
         if (config.EnableLiveDetection)
         {
@@ -240,7 +245,7 @@ public sealed class RecordingWatcher : BackgroundService
                 if (!_jobs.TryGetValue(path, out var job))
                 {
                     // A finished job only keeps its rows in place; it runs no Comskip.
-                    if (_jobs.Values.Count(j => !j.Finished) >= Math.Max(1, config.MaxConcurrentLive) || !FileReady(path))
+                    if (_jobs.Values.Count(j => !j.Finished) >= Math.Max(1, config.MaxConcurrentLive) || !FileReady(path) || IsOptedOut(path))
                     {
                         continue;
                     }
@@ -380,6 +385,27 @@ public sealed class RecordingWatcher : BackgroundService
         }
 
         return paths;
+    }
+
+    /// <summary>
+    /// Jellyfin's per-library opt-out: a recording whose every library lists the
+    /// provider as disabled is not analysed at all, since clients would not be
+    /// shown its rows. A recording in no library is still analysed, in case one
+    /// is added.
+    /// </summary>
+    private bool IsOptedOut(string path)
+    {
+        var holders = _library.GetVirtualFolders()
+            .Where(v => v.Locations is not null && RecordingPaths.IsUnder(path, v.Locations))
+            .ToList();
+        var optedOut = holders.Count > 0 && holders.All(v =>
+            v.LibraryOptions?.DisabledMediaSegmentProviders?.Contains(ComsegSegmentProvider.ProviderName, StringComparer.OrdinalIgnoreCase) == true);
+        if (optedOut && _optedOut.Add(path))
+        {
+            _logger.LogInformation("Comseg: {Path} is in a library with the Comseg provider disabled; leaving it alone", path);
+        }
+
+        return optedOut;
     }
 
     private async Task ServiceJobAsync(LiveJob job, PluginConfiguration config, CancellationToken cancellationToken)

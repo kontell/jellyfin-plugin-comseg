@@ -24,7 +24,7 @@ Dashboard → Plugins → Comseg.
 | Shortest break published | 20 s | |
 | Recordings analysed live at once | 2 | A live Comskip costs about a core at real-time pace. |
 
-Jellyfin's own per-library setting *Disabled media segment providers* can turn the provider off for a library; the plugin's rows are read only while the provider is enabled there.
+Jellyfin's own per-library setting *Disabled media segment providers* turns the plugin off for a library: recordings there are not analysed, and rows stored earlier are read only while the provider is enabled there.
 
 ## API (admin)
 
