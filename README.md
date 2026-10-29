@@ -23,8 +23,8 @@ Dashboard → Plugins → Comseg.
 | Analyses before a break is published | 2 | Drops the one-off false breaks sports feeds produce. |
 | Shortest break published | 20 s | |
 | Recordings analysed live at once | 2 | A live Comskip costs about a third of a core at real-time pace, and holds per-frame data for the whole recording, about 700 MB by the end of a four-hour one. |
-| Analysis height | 0 (as recorded) | 720 or 480 has Comskip analyse a copy the GPU scales down through VA-API, made as the recording is written and used again for the final pass. It costs a fraction of a core, where decoding a UHD recording costs Comskip several. Recordings no taller than this are analysed as they are, and so is a recording whose copy fails. |
-| GPU device | `/dev/dri/renderD128` | The VA-API render device that makes the copy. The user Jellyfin runs as needs access to it, as it does for hardware transcoding. |
+| Analysis height | 0 (as recorded) | 720 or 480 has Comskip analyse a copy the GPU scales down through VA-API, made as the recording is written and used again for the final pass. It costs a fraction of a core, where decoding a UHD recording costs Comskip several. An HDR recording's copy is tone mapped to SDR as well, as Jellyfin does on AMD: read as SDR, an HDR picture is too flat for Comskip to find the channel logo. Recordings that are neither taller than this nor HDR are analysed as they are, and so is a recording whose copy fails. |
+| GPU device | `/dev/dri/renderD128` | The VA-API render device that makes the copy. The user Jellyfin runs as needs access to it, as it does for hardware transcoding. Tone mapping an HDR copy also needs a Vulkan driver for it (Mesa's RADV on AMD), as Jellyfin's own tone mapping does. |
 | Extra recording folders | none | Folders outside Jellyfin's own recording paths whose videos count as recordings, separated by semicolons. |
 
 Jellyfin's own per-library setting *Disabled media segment providers* turns the plugin off for a library: recordings there are not analysed, and rows stored earlier are read only while the provider is enabled there.

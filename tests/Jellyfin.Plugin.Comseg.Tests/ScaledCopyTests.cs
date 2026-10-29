@@ -11,7 +11,7 @@ public class ScaledCopyTests
     [Fact]
     public void ACopyOfAFinishedRecordingReadsItOnceAndKeepsItsTimestamps()
     {
-        var args = ScaledCopy.Arguments("/rec/a.ts", "/work/copy.ts", 720, "/dev/dri/renderD128", null).ToList();
+        var args = ScaledCopy.Arguments("/rec/a.ts", "/work/copy.ts", 720, "/dev/dri/renderD128", null, false).ToList();
         Assert.DoesNotContain("-follow", args);
         Assert.Equal("/rec/a.ts", args[args.IndexOf("-i") + 1]);
         Assert.Contains("scale_vaapi=w=-2:h='min(720,ih)':format=nv12", args);
@@ -23,12 +23,27 @@ public class ScaledCopyTests
     [Fact]
     public void ACopyOfARecordingInProgressWaitsOutAStallBeforeItEnds()
     {
-        var args = ScaledCopy.Arguments("/rec/a.ts", "/work/copy.ts", 480, "/dev/dri/renderD129", TimeSpan.FromMinutes(20)).ToList();
+        var args = ScaledCopy.Arguments("/rec/a.ts", "/work/copy.ts", 480, "/dev/dri/renderD129", TimeSpan.FromMinutes(20), false).ToList();
         Assert.Equal("1", args[args.IndexOf("-follow") + 1]);
         Assert.Equal("1200000000", args[args.IndexOf("-rw_timeout") + 1]);
         Assert.True(args.IndexOf("-rw_timeout") < args.IndexOf("-i"));
         Assert.Equal("/dev/dri/renderD129", args[args.IndexOf("-hwaccel_device") + 1]);
         Assert.Contains("scale_vaapi=w=-2:h='min(480,ih)':format=nv12", args);
+    }
+
+    [Fact]
+    public void AnHdrRecordingsCopyIsToneMappedThroughVulkanBeforeItIsEncoded()
+    {
+        var args = ScaledCopy.Arguments("/rec/a.ts", "/work/copy.ts", 720, "/dev/dri/renderD128", null, true).ToList();
+        Assert.Equal("drm=dr:/dev/dri/renderD128", args[args.IndexOf("-init_hw_device") + 1]);
+        Assert.Contains("vulkan=vk@dr", args);
+        Assert.Equal("vk", args[args.IndexOf("-filter_hw_device") + 1]);
+        Assert.Equal("va", args[args.IndexOf("-hwaccel_device") + 1]);
+        var filter = args[args.IndexOf("-vf") + 1];
+        Assert.StartsWith("scale_vaapi=w=-2:h='min(720,ih)':format=p010,", filter);
+        Assert.Contains("libplacebo=format=bgra:tonemapping=bt.2390", filter);
+        Assert.EndsWith("scale_vaapi=format=nv12", filter);
+        Assert.Equal("h264_vaapi", args[args.IndexOf("-c:v") + 1]);
     }
 
     [Theory]

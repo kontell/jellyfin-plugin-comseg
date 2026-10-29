@@ -11,8 +11,9 @@ namespace Jellyfin.Plugin.Comseg.Live;
 /// The scaled copy a live job reads, from the decision to make one to the
 /// file handed to the final pass. While the recording runs it says which
 /// file the live Comskip opens: the copy once it has its first frames, the
-/// recording when no copy is wanted or the recording is no taller than the
-/// height asked, and the recording for good once the copy has failed. When
+/// recording when no copy is wanted or the recording is neither taller than
+/// the height asked nor HDR, and the recording for good once the copy has
+/// failed. When
 /// the recording ends it waits for the copy to catch up, and hands it on
 /// only if it covers the whole recording.
 /// </summary>
@@ -28,6 +29,7 @@ public sealed class LiveCopy : IDisposable
     private ScaledCopy.Following? _ffmpeg;
     private DateTime _startedUtc;
     private int _probes;
+    private bool _hdr;
     private volatile State _state;
 
     /// <summary>Initializes a new instance of the <see cref="LiveCopy"/> class.</summary>
@@ -75,7 +77,7 @@ public sealed class LiveCopy : IDisposable
                     return null; // the recording's first picture may not be readable yet
                 }
 
-                if (source is null || source.Height <= _height)
+                if (source is null || (source.Height <= _height && !source.Hdr))
                 {
                     if (source is null)
                     {
@@ -86,7 +88,8 @@ public sealed class LiveCopy : IDisposable
                     return _recording;
                 }
 
-                _ffmpeg = _copies.StartFollowing(_recording, _path, _height, config);
+                _hdr = source.Hdr;
+                _ffmpeg = _copies.StartFollowing(_recording, _path, _height, _hdr, config);
                 if (_ffmpeg is null)
                 {
                     return Fail("the scaled copy could not be started");
@@ -105,7 +108,15 @@ public sealed class LiveCopy : IDisposable
                 if (RecordingWatcher.FileReady(_path))
                 {
                     _state = State.Reading;
-                    _logger.LogInformation("Comseg: analysing a {Height}p copy of {Path} made on the GPU", _height, _recording);
+                    if (_hdr)
+                    {
+                        _logger.LogInformation("Comseg: analysing a {Height}p copy of {Path} made on the GPU, tone mapped from HDR", _height, _recording);
+                    }
+                    else
+                    {
+                        _logger.LogInformation("Comseg: analysing a {Height}p copy of {Path} made on the GPU", _height, _recording);
+                    }
+
                     return _path;
                 }
 
