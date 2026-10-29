@@ -4,7 +4,7 @@
     <title>Comseg</title>
 </head>
 <body>
-<div id="comsegConfigPage" data-role="page" class="page type-interior pluginConfigurationPage" data-require="emby-input,emby-button,emby-checkbox,emby-textarea">
+<div id="comsegConfigPage" data-role="page" class="page type-interior pluginConfigurationPage" data-require="emby-input,emby-button,emby-checkbox">
     <div data-role="content">
         <div class="content-primary">
             <form id="comsegConfigForm">
@@ -77,8 +77,8 @@
                         <input is="emby-input" type="number" id="txtTimeout" pattern="[0-9]*" min="5" max="1440" label="Full pass time limit (minutes)" />
                     </div>
                     <div class="inputContainer">
-                        <textarea is="emby-textarea" id="txtExtraPaths" label="Extra recording folders (one per line)" rows="3"></textarea>
-                        <div class="fieldDescription">Jellyfin's own recording folders are always included.</div>
+                        <input is="emby-input" type="text" id="txtExtraPaths" label="Extra recording folders" />
+                        <div class="fieldDescription">Separate several with semicolons. Jellyfin's own recording folders are always included.</div>
                     </div>
                     <br />
                     <button is="emby-button" type="submit" class="raised button-submit block">
@@ -119,7 +119,8 @@
                     setValue('#txtRetries', config.LiveTvRetries);
                     setValue('#txtPoll', config.PollSeconds);
                     setValue('#txtTimeout', config.CompletedPassTimeoutMinutes);
-                    setValue('#txtExtraPaths', config.ExtraRecordingPaths || '');
+                    // Older saves came from a multi-line box; show them on the one line.
+                    setValue('#txtExtraPaths', (config.ExtraRecordingPaths || '').split(/\r?\n/).map(function (s) { return s.trim(); }).filter(Boolean).join('; '));
                     Dashboard.hideLoadingMsg();
                 });
             }

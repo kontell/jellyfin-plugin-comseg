@@ -47,6 +47,6 @@ public class PluginConfiguration : BasePluginConfiguration
     /// <summary>Gets or sets the time limit (minutes) for a full pass over a finished recording.</summary>
     public int CompletedPassTimeoutMinutes { get; set; } = 90;
 
-    /// <summary>Gets or sets extra folders whose videos count as recordings, one per line, besides Jellyfin's own recording folders.</summary>
+    /// <summary>Gets or sets extra folders whose videos count as recordings, separated by semicolons or lines, besides Jellyfin's own recording folders.</summary>
     public string ExtraRecordingPaths { get; set; } = string.Empty;
 }
