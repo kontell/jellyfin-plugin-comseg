@@ -72,6 +72,7 @@ public class ComsegController : ControllerBase
             Confirmed = j.Tracker.Confirmed.Count,
             Published = j.Published,
             ProcessRunning = j.Process is not null && !j.Process.HasExited,
+            CopyHeight = j.CopyHeight,
             Finalizing = j.Finalizing,
             Finished = j.Finished,
             LastError = Problems(j),
@@ -184,6 +185,9 @@ public class ComsegController : ControllerBase
 
         /// <summary>Gets or sets a value indicating whether Comskip is running.</summary>
         public bool ProcessRunning { get; set; }
+
+        /// <summary>Gets or sets the height of the scaled copy the live Comskip reads, or null when it reads the recording.</summary>
+        public int? CopyHeight { get; set; }
 
         /// <summary>Gets or sets a value indicating whether the recording ended and its final pass is running.</summary>
         public bool Finalizing { get; set; }

@@ -26,6 +26,7 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
     {
         serviceCollection.AddSingleton<ComskipRunner>();
         serviceCollection.AddSingleton<Workspace>();
+        serviceCollection.AddSingleton<ScaledCopy>();
         serviceCollection.AddSingleton<CompletedPass>();
         serviceCollection.AddSingleton<RecordingPaths>();
         serviceCollection.AddSingleton<DetectionRegistry>();

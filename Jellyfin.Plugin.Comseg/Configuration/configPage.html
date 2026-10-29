@@ -67,6 +67,14 @@
                         <input is="emby-input" type="number" id="txtThreads" pattern="[0-9]*" min="1" max="64" label="Comskip decoder threads" />
                     </div>
                     <div class="inputContainer">
+                        <input is="emby-input" type="number" id="txtHeight" pattern="[0-9]*" min="0" max="1080" label="Analysis height (lines; 0 analyses recordings as they are)" />
+                        <div class="fieldDescription">720 or 480 has Comskip analyse a copy the GPU scales down through VA-API, which costs a fraction of a core where decoding a UHD recording costs Comskip several. Recordings no taller than this are analysed as they are.</div>
+                    </div>
+                    <div class="inputContainer">
+                        <input is="emby-input" type="text" id="txtVaapiDevice" label="GPU device" />
+                        <div class="fieldDescription">The VA-API render device that makes the copy. The user Jellyfin runs as needs access to it.</div>
+                    </div>
+                    <div class="inputContainer">
                         <input is="emby-input" type="number" id="txtRetries" pattern="[0-9]*" min="1" max="100000" label="Live stall tolerance (4-second retries)" />
                         <div class="fieldDescription">Comskip waits this many 4 s rounds for a recording that stopped growing before it gives up. 300 is 20 minutes.</div>
                     </div>
@@ -116,6 +124,8 @@
                     setValue('#txtMinBreak', config.MinBreakSeconds);
                     setValue('#txtMaxLive', config.MaxConcurrentLive);
                     setValue('#txtThreads', config.ThreadCount);
+                    setValue('#txtHeight', config.AnalysisHeight || 0);
+                    setValue('#txtVaapiDevice', config.VaapiDevice || '/dev/dri/renderD128');
                     setValue('#txtRetries', config.LiveTvRetries);
                     setValue('#txtPoll', config.PollSeconds);
                     setValue('#txtTimeout', config.CompletedPassTimeoutMinutes);
@@ -144,6 +154,7 @@
                             + ', published breaks: ' + j.Published
                             + (j.ItemId ? '' : ', no library item yet')
                             + (j.ProcessRunning ? ', Comskip running' : ', Comskip not running')
+                            + (j.CopyHeight ? ', reading a ' + j.CopyHeight + 'p copy' : '')
                             + (j.Finalizing ? ', finishing' : '')
                             + (j.Finished ? ', finished; keeping the breaks in place until Jellyfin has refreshed the closed file' : '')
                             + (j.LastError ? ', ' + escapeHtml(j.LastError) : '')
@@ -182,6 +193,8 @@
                     config.MinBreakSeconds = num('#txtMinBreak', 20);
                     config.MaxConcurrentLive = num('#txtMaxLive', 2);
                     config.ThreadCount = num('#txtThreads', 4);
+                    config.AnalysisHeight = num('#txtHeight', 0);
+                    config.VaapiDevice = document.querySelector('#txtVaapiDevice').value.trim() || '/dev/dri/renderD128';
                     config.LiveTvRetries = num('#txtRetries', 300);
                     config.PollSeconds = num('#txtPoll', 15);
                     config.CompletedPassTimeoutMinutes = num('#txtTimeout', 90);

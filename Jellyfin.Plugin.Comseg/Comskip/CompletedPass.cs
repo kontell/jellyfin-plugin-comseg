@@ -13,22 +13,27 @@ namespace Jellyfin.Plugin.Comseg.Comskip;
 
 /// <summary>
 /// One full Comskip pass over a finished recording: compose the ini, run,
-/// read the .edl, drop breaks under the minimum length, clean up.
+/// read the .edl, drop breaks under the minimum length, clean up. When the
+/// settings ask for a scaled copy, Comskip reads a copy the GPU made instead
+/// of the recording: one a live job made while it recorded, or one made here.
 /// </summary>
 public sealed class CompletedPass
 {
     private readonly ComskipRunner _runner;
     private readonly Workspace _workspace;
+    private readonly ScaledCopy _copies;
     private readonly ILogger<CompletedPass> _logger;
 
     /// <summary>Initializes a new instance of the <see cref="CompletedPass"/> class.</summary>
     /// <param name="runner">The runner.</param>
     /// <param name="workspace">The workspace.</param>
+    /// <param name="copies">The scaled copies.</param>
     /// <param name="logger">The logger.</param>
-    public CompletedPass(ComskipRunner runner, Workspace workspace, ILogger<CompletedPass> logger)
+    public CompletedPass(ComskipRunner runner, Workspace workspace, ScaledCopy copies, ILogger<CompletedPass> logger)
     {
         _runner = runner;
         _workspace = workspace;
+        _copies = copies;
         _logger = logger;
     }
 
@@ -36,8 +41,9 @@ public sealed class CompletedPass
     /// <param name="mediaPath">The recording.</param>
     /// <param name="config">The plugin configuration.</param>
     /// <param name="cancellationToken">Cancellation.</param>
+    /// <param name="copy">A scaled copy of the finished recording made already, if there is one.</param>
     /// <returns>The breaks, or null when Comskip produced nothing.</returns>
-    public async Task<IReadOnlyList<Break>?> RunAsync(string mediaPath, PluginConfiguration config, CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<Break>?> RunAsync(string mediaPath, PluginConfiguration config, CancellationToken cancellationToken, string? copy = null)
     {
         var jobDir = _workspace.JobDir(config, "scan", mediaPath);
         Directory.CreateDirectory(jobDir);
@@ -48,8 +54,18 @@ public sealed class CompletedPass
             cancellationToken).ConfigureAwait(false);
 
         var timeout = TimeSpan.FromMinutes(Math.Clamp(config.CompletedPassTimeoutMinutes, 5, 24 * 60));
-        _logger.LogInformation("Comseg: full Comskip pass over {Media}", mediaPath);
-        var result = await _runner.RunAsync(config.ComskipPath, iniPath, jobDir, mediaPath, timeout, cancellationToken).ConfigureAwait(false);
+        copy ??= await _copies.PrepareAsync(mediaPath, Path.Combine(jobDir, "copy.ts"), config, timeout, cancellationToken).ConfigureAwait(false);
+        var input = copy ?? mediaPath;
+        if (copy is null)
+        {
+            _logger.LogInformation("Comseg: full Comskip pass over {Media}", mediaPath);
+        }
+        else
+        {
+            _logger.LogInformation("Comseg: full Comskip pass over {Media}, through its scaled copy", mediaPath);
+        }
+
+        var result = await _runner.RunAsync(config.ComskipPath, iniPath, jobDir, input, timeout, cancellationToken).ConfigureAwait(false);
         if (!result.Ran || result.EdlPath is null)
         {
             return null;
