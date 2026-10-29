@@ -25,7 +25,7 @@ Dashboard → Plugins → Comseg.
 | Recordings analysed live at once | 2 | A live Comskip costs about a third of a core at real-time pace, and holds per-frame data for the whole recording, about 700 MB by the end of a four-hour one. |
 | Extra recording folders | none | Folders outside Jellyfin's own recording paths whose videos count as recordings, separated by semicolons. |
 
-Jellyfin's own per-library setting *Disabled media segment providers* can turn the provider off for a library; the plugin's rows are read only while the provider is enabled there.
+Jellyfin's own per-library setting *Disabled media segment providers* turns the plugin off for a library: recordings there are not analysed, and rows stored earlier are read only while the provider is enabled there.
 
 ## API (admin)
 
