@@ -32,6 +32,18 @@ public class ScaledCopyTests
     }
 
     [Theory]
+    [InlineData(7200, 7195, true)]
+    [InlineData(7200, 7000, false)]
+    [InlineData(0, 7200, false)]
+    [InlineData(7200, 0, false)]
+    public void ACopyStandsInOnlyWhenBothDurationsShowItReachesTheEnd(double recording, double copy, bool covers)
+        => Assert.Equal(covers, ScaledCopy.Covers(new ScaledCopy.Probe(1080, recording), new ScaledCopy.Probe(720, copy)));
+
+    [Fact]
+    public void ACopyThatCannotBeProbedDoesNotStandIn()
+        => Assert.False(ScaledCopy.Covers(new ScaledCopy.Probe(1080, 7200), null));
+
+    [Theory]
     [InlineData(0, 0)]
     [InlineData(-5, 0)]
     [InlineData(720, 720)]

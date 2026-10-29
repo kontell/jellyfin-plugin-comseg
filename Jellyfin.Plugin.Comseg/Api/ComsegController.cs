@@ -72,7 +72,7 @@ public class ComsegController : ControllerBase
             Confirmed = j.Tracker.Confirmed.Count,
             Published = j.Published,
             ProcessRunning = j.Process is not null && !j.Process.HasExited,
-            CopyHeight = j.CopyHeight,
+            CopyHeight = j.Copy.Height,
             Finalizing = j.Finalizing,
             Finished = j.Finished,
             LastError = Problems(j),
@@ -138,13 +138,12 @@ public class ComsegController : ControllerBase
         return Accepted();
     }
 
-    /// <summary>A job's problems for the status page: storing the breaks first, then Comskip.</summary>
-    private static string? Problems(LiveJob job) => (job.StoreError, job.LastError) switch
+    /// <summary>A job's problems for the status page: storing the breaks first, then Comskip, then the scaled copy.</summary>
+    private static string? Problems(LiveJob job)
     {
-        (null, var comskip) => comskip,
-        (var store, null) => store,
-        (var store, var comskip) => store + "; " + comskip,
-    };
+        var problems = new[] { job.StoreError, job.LastError, job.Copy.Problem }.Where(p => p is not null).ToList();
+        return problems.Count == 0 ? null : string.Join("; ", problems);
+    }
 
     /// <summary>The status response.</summary>
     public sealed class StatusResponse

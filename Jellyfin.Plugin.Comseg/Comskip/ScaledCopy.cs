@@ -50,6 +50,17 @@ public sealed class ScaledCopy
         => config.AnalysisHeight > 0 ? Math.Clamp(config.AnalysisHeight, 240, 1080) : 0;
 
     /// <summary>
+    /// Whether a copy covers the whole recording: both durations known, and
+    /// the copy at most ten seconds short. An unknown duration (ffprobe found
+    /// none) does not count as complete.
+    /// </summary>
+    /// <param name="recording">The recording's probe.</param>
+    /// <param name="copy">The copy's probe.</param>
+    /// <returns>True when the copy can stand in for the recording.</returns>
+    public static bool Covers(Probe? recording, Probe? copy)
+        => recording is { Duration: > 0 } && copy is { Duration: > 0 } && copy.Duration >= recording.Duration - 10;
+
+    /// <summary>
     /// Starts a copy that follows a recording still being written. Like the
     /// live Comskip it waits out a stalled recording for the stall tolerance
     /// before it ends; when the recording ends the job stops it once it has
@@ -86,7 +97,7 @@ public sealed class ScaledCopy
             return null;
         }
 
-        var original = await ProbeAsync(source, cancellationToken).ConfigureAwait(false);
+        var original = await ProbeAsync(source, true, cancellationToken).ConfigureAwait(false);
         if (original is null || original.Height <= height)
         {
             return null;
@@ -117,8 +128,8 @@ public sealed class ScaledCopy
             return null;
         }
 
-        var scaled = process.ExitCode == 0 ? await ProbeAsync(copy, cancellationToken).ConfigureAwait(false) : null;
-        if (scaled is null || scaled.Duration < original.Duration - 10)
+        var scaled = process.ExitCode == 0 ? await ProbeAsync(copy, true, cancellationToken).ConfigureAwait(false) : null;
+        if (!Covers(original, scaled))
         {
             _logger.LogWarning("Comseg: the {Height}p copy of {Media} failed (code {Code}); analysing the recording itself. {Tail}", height, source, process.ExitCode, tail);
             return null;
@@ -128,11 +139,12 @@ public sealed class ScaledCopy
         return copy;
     }
 
-    /// <summary>A file's picture height and duration, through Jellyfin's ffprobe.</summary>
+    /// <summary>A file's picture height, and its duration when asked, through Jellyfin's ffprobe.</summary>
     /// <param name="path">The file.</param>
+    /// <param name="duration">Whether to read the duration too, which seeks to the end of the file: pointless on a recording still being written.</param>
     /// <param name="cancellationToken">Cancellation.</param>
     /// <returns>The facts, or null when the file has no readable video yet.</returns>
-    public async Task<Probe?> ProbeAsync(string path, CancellationToken cancellationToken)
+    public async Task<Probe?> ProbeAsync(string path, bool duration, CancellationToken cancellationToken)
     {
         var info = new ProcessStartInfo
         {
@@ -142,7 +154,7 @@ public sealed class ScaledCopy
             RedirectStandardError = true,
             CreateNoWindow = true,
         };
-        foreach (var arg in new[] { "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=height", "-show_entries", "format=duration", "-of", "default=nw=1", path })
+        foreach (var arg in new[] { "-v", "error", "-select_streams", "v:0", "-show_entries", duration ? "stream=height:format=duration" : "stream=height", "-of", "default=nw=1", path })
         {
             info.ArgumentList.Add(arg);
         }
@@ -161,7 +173,6 @@ public sealed class ScaledCopy
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
-            ComskipRunner.TryKill(process);
             return null;
         }
         catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
@@ -169,8 +180,13 @@ public sealed class ScaledCopy
             _logger.LogWarning(ex, "Comseg: ffprobe could not be started");
             return null;
         }
+        finally
+        {
+            // A caller that gives up must not leave ffprobe running; disposing does not stop it.
+            ComskipRunner.TryKill(process);
+        }
 
-        var duration = double.NaN;
+        var seconds = 0.0;
         var height = 0;
         foreach (var line in output.Split('\n'))
         {
@@ -188,12 +204,13 @@ public sealed class ScaledCopy
                     int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out height);
                     break;
                 case "duration":
-                    double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out duration);
+                    // N/A, for a duration ffprobe could not find, parses as 0: unknown
+                    double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out seconds);
                     break;
             }
         }
 
-        return height == 0 ? null : new Probe(height, double.IsNaN(duration) ? 0 : duration);
+        return height == 0 ? null : new Probe(height, seconds);
     }
 
     /// <summary>The ffmpeg arguments for a copy.</summary>
