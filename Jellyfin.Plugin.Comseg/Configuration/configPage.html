@@ -51,7 +51,7 @@
                     </div>
                     <div class="inputContainer">
                         <input is="emby-input" type="number" id="txtInterval" pattern="[0-9]*" min="10" max="3600" label="Live analysis interval (seconds of content)" />
-                        <div class="fieldDescription">How often the live Comskip re-runs its full analysis over what it has seen so far. 60 is a good default.</div>
+                        <div class="fieldDescription">How much recording passes between the live Comskip's break-finding passes. Each frame is decoded once, as the recording grows; every pass reuses those frames and finds the breaks afresh, which takes seconds. 60 is a good default.</div>
                     </div>
                     <div class="inputContainer">
                         <input is="emby-input" type="number" id="txtConfirm" pattern="[0-9]*" min="1" max="10" label="Analyses before a break is published" />

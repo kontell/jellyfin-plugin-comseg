@@ -11,9 +11,9 @@ namespace Jellyfin.Plugin.Comseg;
 /// <summary>
 /// Comseg: commercial breaks in DVR recordings, detected with Comskip and
 /// published as Jellyfin Commercial media segments. Recordings still being
-/// written get their breaks while they record (a patched Comskip re-runs its
-/// full analysis every minute of content); finished recordings get a final
-/// pass. Clients skip the segments through the standard MediaSegments API.
+/// written get their breaks while they record (a patched Comskip finds them
+/// afresh every minute of content from the frames decoded so far); finished
+/// recordings get a final pass. Clients skip the segments through the standard MediaSegments API.
 /// </summary>
 public class ComsegPlugin : BasePlugin<PluginConfiguration>, IHasWebPages
 {

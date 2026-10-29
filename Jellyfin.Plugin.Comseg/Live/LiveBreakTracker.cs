@@ -7,7 +7,7 @@ namespace Jellyfin.Plugin.Comseg.Live;
 
 /// <summary>
 /// Decides which breaks from a recording in progress are worth publishing.
-/// Each full analysis Comskip runs over the growing file reports every break
+/// Each analysis Comskip runs over the frames decoded so far reports every break
 /// it currently believes in; a break is published once it has been reported
 /// in enough consecutive analyses (a start that holds still) and is long
 /// enough. Its end follows the latest analysis: while the break is still on
