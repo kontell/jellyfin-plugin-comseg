@@ -43,8 +43,7 @@ public sealed class LiveBreakTracker
 
     /// <summary>Feeds one analysis.</summary>
     /// <param name="pass">The breaks that analysis reported.</param>
-    /// <returns>True when the publishable list changed.</returns>
-    public bool Observe(IReadOnlyList<Break> pass)
+    public void Observe(IReadOnlyList<Break> pass)
     {
         Passes++;
         var next = new List<Candidate>(pass.Count);
@@ -74,31 +73,10 @@ public sealed class LiveBreakTracker
 
         next.Sort((a, b) => a.Start.CompareTo(b.Start));
         _candidates = next;
-        var confirmed = next
+        Confirmed = next
             .Where(c => c.Seen >= _confirmPasses && c.End - c.Start >= _minSeconds)
             .Select(c => new Break(c.Start, c.End))
             .ToList();
-        var changed = !SameList(confirmed, Confirmed);
-        Confirmed = confirmed;
-        return changed;
-    }
-
-    private static bool SameList(IReadOnlyList<Break> a, IReadOnlyList<Break> b)
-    {
-        if (a.Count != b.Count)
-        {
-            return false;
-        }
-
-        for (var i = 0; i < a.Count; i++)
-        {
-            if (!a[i].Matches(b[i], 0.01))
-            {
-                return false;
-            }
-        }
-
-        return true;
     }
 
     private sealed record Candidate(double Start, double End, int Seen, int Missing);

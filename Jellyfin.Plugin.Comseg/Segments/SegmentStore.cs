@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -7,20 +8,25 @@ using Jellyfin.Database.Implementations.Enums;
 using Jellyfin.Plugin.Comseg.Edl;
 using Jellyfin.Plugin.Comseg.Providers;
 using MediaBrowser.Controller.Entities;
-using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.MediaSegments;
+using MediaBrowser.Model.Configuration;
 using MediaBrowser.Model.MediaSegments;
 using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.Comseg.Segments;
 
 /// <summary>
-/// The plugin's Commercial rows in Jellyfin's segment store, by item. Rows
-/// are replaced rather than edited (the store has create and delete only),
-/// so a break whose end moved is a delete and a create; clients must
-/// re-fetch by item, never cache by segment id. The segment DTO carries no
-/// provider id, so on first contact with an item every Commercial row it
-/// already has is adopted as ours.
+/// Comseg's Commercial rows in Jellyfin's segment store, by item. Every
+/// store reads the rows Comseg has on the item right now and makes them
+/// match the breaks given, touching only what differs: Jellyfin deletes an
+/// item's segments whenever a refresh notices its file changed, which a
+/// recording in progress is by definition, so remembering what was written
+/// would only remember rows that are gone. Only rows under Comseg's own
+/// provider id are read, kept or deleted; a row another provider wrote, or
+/// one an admin added under another id, is never touched. Rows are replaced
+/// rather than edited (the store has create and delete only), so a break
+/// whose end moved is a delete and a create; clients must re-fetch by item,
+/// never cache by segment id.
 /// </summary>
 public sealed class SegmentStore
 {
@@ -28,61 +34,44 @@ public sealed class SegmentStore
     private const double EndTolerance = 0.5;
 
     private readonly IMediaSegmentManager _segments;
-    private readonly ILibraryManager _library;
+    private readonly Workspace _workspace;
     private readonly ILogger<SegmentStore> _logger;
-    private readonly Dictionary<Guid, List<Row>> _rows = new();
     private readonly SemaphoreSlim _gate = new(1, 1);
 
     /// <summary>Initializes a new instance of the <see cref="SegmentStore"/> class.</summary>
     /// <param name="segments">The segment manager.</param>
-    /// <param name="library">The library manager.</param>
+    /// <param name="workspace">The workspace, for the provisional marks.</param>
     /// <param name="logger">The logger.</param>
-    public SegmentStore(IMediaSegmentManager segments, ILibraryManager library, ILogger<SegmentStore> logger)
+    public SegmentStore(IMediaSegmentManager segments, Workspace workspace, ILogger<SegmentStore> logger)
     {
         _segments = segments;
-        _library = library;
+        _workspace = workspace;
         _logger = logger;
     }
 
-    /// <summary>The rows known for an item (empty until adopted).</summary>
-    /// <param name="itemId">The item.</param>
-    /// <returns>The rows.</returns>
-    public IReadOnlyList<Row> Known(Guid itemId)
-    {
-        lock (_rows)
-        {
-            return _rows.TryGetValue(itemId, out var rows) ? rows.ToList() : Array.Empty<Row>();
-        }
-    }
-
-    /// <summary>Brings an item's existing Commercial rows under management.</summary>
+    /// <summary>Makes the item's Comseg rows match the given breaks, touching only what differs.</summary>
     /// <param name="item">The item.</param>
-    /// <returns>The rows.</returns>
-    public async Task<IReadOnlyList<Row>> AdoptAsync(BaseItem item)
-    {
-        await _gate.WaitAsync().ConfigureAwait(false);
-        try
-        {
-            return await AdoptLockedAsync(item).ConfigureAwait(false);
-        }
-        finally
-        {
-            _gate.Release();
-        }
-    }
-
-    /// <summary>Makes the stored rows match the given breaks, touching only what changed.</summary>
-    /// <param name="item">The item.</param>
-    /// <param name="breaks">The breaks to publish.</param>
+    /// <param name="breaks">The breaks to store.</param>
+    /// <param name="why">A word for the log: what these breaks are.</param>
+    /// <param name="final">
+    /// Whether the breaks are a full pass's result. Live breaks mark the item
+    /// provisional before its rows are written; a full pass's result clears
+    /// the mark once they are.
+    /// </param>
     /// <returns>How many rows were created or deleted.</returns>
-    public async Task<int> PublishAsync(BaseItem item, IReadOnlyList<Break> breaks)
+    public async Task<int> PublishAsync(BaseItem item, IReadOnlyList<Break> breaks, string why, bool final)
     {
         await _gate.WaitAsync().ConfigureAwait(false);
         try
         {
-            var known = (await AdoptLockedAsync(item).ConfigureAwait(false)).ToList();
-            var keep = new List<Row>();
+            if (!final)
+            {
+                MarkProvisional(item);
+            }
+
+            var known = await ReadAsync(item).ConfigureAwait(false);
             var create = new List<Break>();
+            var deleted = 0;
             foreach (var b in breaks)
             {
                 var row = known.FirstOrDefault(r => Math.Abs(r.Start - b.Start) <= StartTolerance);
@@ -96,36 +85,32 @@ public sealed class SegmentStore
                 if (Math.Abs(row.End - b.End) > EndTolerance || Math.Abs(row.Start - b.Start) > EndTolerance)
                 {
                     await DeleteAsync(row).ConfigureAwait(false);
+                    deleted++;
                     create.Add(b);
-                }
-                else
-                {
-                    keep.Add(row);
                 }
             }
 
-            // Rows no current break accounts for: a confirmed break the
-            // analysis later withdrew.
+            // Rows no current break accounts for: a break the analysis withdrew.
             foreach (var orphan in known)
             {
                 await DeleteAsync(orphan).ConfigureAwait(false);
+                deleted++;
             }
 
             foreach (var b in create)
             {
-                keep.Add(await CreateAsync(item.Id, b).ConfigureAwait(false));
+                await CreateAsync(item.Id, b).ConfigureAwait(false);
             }
 
-            keep.Sort((a, b) => a.Start.CompareTo(b.Start));
-            lock (_rows)
+            if (final)
             {
-                _rows[item.Id] = keep;
+                _workspace.ClearProvisional(item.Id);
             }
 
-            var changes = known.Count + create.Count;
+            var changes = deleted + create.Count;
             if (changes > 0)
             {
-                _logger.LogInformation("Comseg published {Count} commercial breaks for {Name} ({Changes} rows changed)", keep.Count, item.Name, changes);
+                _logger.LogInformation("Comseg stored {Count} commercial breaks for {Name} ({Why}; {Changes} rows changed)", breaks.Count, item.Name, why, changes);
             }
 
             return changes;
@@ -136,84 +121,54 @@ public sealed class SegmentStore
         }
     }
 
-    /// <summary>Replaces every row for an item with the given breaks.</summary>
-    /// <param name="item">The item.</param>
-    /// <param name="breaks">The final breaks.</param>
-    /// <returns>A task.</returns>
-    public async Task ReplaceAsync(BaseItem item, IReadOnlyList<Break> breaks)
-    {
-        await _gate.WaitAsync().ConfigureAwait(false);
-        try
-        {
-            var known = await AdoptLockedAsync(item).ConfigureAwait(false);
-            foreach (var row in known)
-            {
-                await DeleteAsync(row).ConfigureAwait(false);
-            }
-
-            var rows = new List<Row>();
-            foreach (var b in breaks.OrderBy(b => b.Start))
-            {
-                rows.Add(await CreateAsync(item.Id, b).ConfigureAwait(false));
-            }
-
-            lock (_rows)
-            {
-                _rows[item.Id] = rows;
-            }
-
-            _logger.LogInformation("Comseg stored {Count} commercial breaks for {Name} (final pass)", rows.Count, item.Name);
-        }
-        finally
-        {
-            _gate.Release();
-        }
-    }
-
-    /// <summary>Drops the in-memory knowledge of an item (the rows stay in Jellyfin).</summary>
-    /// <param name="itemId">The item.</param>
-    public void Forget(Guid itemId)
-    {
-        lock (_rows)
-        {
-            _rows.Remove(itemId);
-        }
-    }
+    /// <summary>Deletes an item's Comseg rows and its provisional mark: Jellyfin removed the item.</summary>
+    /// <param name="item">The removed item.</param>
+    /// <returns>How many rows were deleted.</returns>
+    public Task<int> ForgetAsync(BaseItem item) => PublishAsync(item, Array.Empty<Break>(), "item removed", final: true);
 
     private static long Ticks(double seconds) => (long)Math.Round(seconds * TimeSpan.TicksPerSecond);
 
-    private async Task<IReadOnlyList<Row>> AdoptLockedAsync(BaseItem item)
+    private void MarkProvisional(BaseItem item)
     {
-        lock (_rows)
+        try
         {
-            if (_rows.TryGetValue(item.Id, out var rows))
-            {
-                return rows.ToList();
-            }
+            _workspace.MarkProvisional(item.Id);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Without the mark, a final pass that never stores leaves these rows
+            // as the item's result; still better than storing none.
+            _logger.LogWarning(ex, "Comseg could not mark the live breaks for {Name} as provisional", item.Name);
+        }
+    }
+
+    private async Task<List<Row>> ReadAsync(BaseItem item)
+    {
+        // Jellyfin filters a segment read by provider only through library
+        // options, so name every other provider as disabled: what comes back is
+        // Comseg's rows alone, whatever the item's own library enables.
+        var providers = _segments.GetSupportedProviders(item).Select(p => p.Name).ToList();
+        if (!providers.Contains(ComsegSegmentProvider.ProviderName, StringComparer.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(item.Name + " does not take media segments");
         }
 
-        var options = _library.GetLibraryOptions(item);
+        var options = new LibraryOptions
+        {
+            DisabledMediaSegmentProviders = providers
+                .Where(n => !string.Equals(n, ComsegSegmentProvider.ProviderName, StringComparison.OrdinalIgnoreCase))
+                .ToArray(),
+        };
         var existing = await _segments
-            .GetSegmentsAsync(item, new[] { MediaSegmentType.Commercial }, options, filterByProvider: false)
+            .GetSegmentsAsync(item, new[] { MediaSegmentType.Commercial }, options, filterByProvider: true)
             .ConfigureAwait(false);
-        var adopted = existing
+        return existing
             .Select(d => new Row(d.Id, d.StartTicks / (double)TimeSpan.TicksPerSecond, d.EndTicks / (double)TimeSpan.TicksPerSecond))
             .OrderBy(r => r.Start)
             .ToList();
-        lock (_rows)
-        {
-            _rows[item.Id] = adopted;
-        }
-
-        if (adopted.Count > 0)
-        {
-            _logger.LogDebug("Comseg adopted {Count} existing commercial rows for {Name}", adopted.Count, item.Name);
-        }
-
-        return adopted.ToList();
     }
 
-    private async Task<Row> CreateAsync(Guid itemId, Break b)
+    private async Task CreateAsync(Guid itemId, Break b)
     {
         var dto = new MediaSegmentDto
         {
@@ -224,7 +179,6 @@ public sealed class SegmentStore
             EndTicks = Ticks(b.End),
         };
         await _segments.CreateSegmentAsync(dto, ComsegSegmentProvider.ProviderId).ConfigureAwait(false);
-        return new Row(dto.Id, b.Start, b.End);
     }
 
     private async Task DeleteAsync(Row row)
@@ -239,9 +193,5 @@ public sealed class SegmentStore
         }
     }
 
-    /// <summary>A stored row.</summary>
-    /// <param name="Id">The segment id.</param>
-    /// <param name="Start">Start, seconds.</param>
-    /// <param name="End">End, seconds.</param>
-    public sealed record Row(Guid Id, double Start, double End);
+    private sealed record Row(Guid Id, double Start, double End);
 }

@@ -5,7 +5,7 @@ Jellyfin server plugin: commercial breaks in DVR recordings, found with [Comskip
 Two paths:
 
 - **While a recording is being written.** The plugin watches Jellyfin's timers for recordings in progress, runs Comskip live against each file and reads the full analysis the [Comseg build of Comskip](https://github.com/kontell/Comskip) writes every minute of content. A break is published once two consecutive analyses agree on where it starts; its end follows the latest analysis while the break is still on air, so a viewer a couple of minutes behind live skips it.
-- **Once a recording finishes.** A full pass replaces the live breaks with Comskip's final result. Recordings that the scheduled *Media Segment Scan* finds without breaks get the same pass.
+- **Once a recording finishes.** A full pass replaces the live breaks with Comskip's final result. Jellyfin clears an item's segments when it notices the file has closed, usually while that pass is still running; the plugin puts the breaks straight back. Recordings that the scheduled *Media Segment Scan* finds without breaks, or with only the live ones because the final pass was interrupted, get the same pass.
 
 Requires Jellyfin 12 and a Comskip binary on the server. Finished recordings work with stock Comskip. Detection while a recording is being written needs the [Comseg build of Comskip](https://github.com/kontell/Comskip), branch `comseg`, which adds a periodic full analysis to Comskip's live mode; stock live mode only reports breaks that contain black frames. The change is on its way upstream, see the notes in [`comskip/`](comskip/README.md).
 

@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.IO;
 using System.Security.Cryptography;
 using System.Text;
@@ -7,7 +8,16 @@ using MediaBrowser.Common.Configuration;
 
 namespace Jellyfin.Plugin.Comseg.Segments;
 
-/// <summary>Where Comskip's output goes: a folder per job under the work directory.</summary>
+/// <summary>
+/// Where Comskip's output goes: a folder per job under the work directory.
+/// Also keeps the provisional marks. An item whose rows came from live
+/// analysis alone carries one until a full pass has replaced them, so the
+/// scheduled scan still runs that pass although the item has rows: without
+/// it, a final pass that never stored (a restart in the middle of it, a
+/// timeout, a pass that wrote nothing) would leave the live result for good.
+/// A mark is a file under the data path rather than the work directory, so
+/// it outlives a restart and a work directory on tmpfs.
+/// </summary>
 public sealed class Workspace
 {
     private readonly IApplicationPaths _paths;
@@ -34,6 +44,39 @@ public sealed class Workspace
     /// <returns>The folder path.</returns>
     public string JobDir(PluginConfiguration config, string kind, string mediaPath)
         => Path.Combine(Root(config), kind, Hash(mediaPath));
+
+    /// <summary>Marks an item's rows as live analysis only.</summary>
+    /// <param name="itemId">The item.</param>
+    public void MarkProvisional(Guid itemId)
+    {
+        var path = ProvisionalPath(itemId);
+        if (!File.Exists(path))
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            File.WriteAllBytes(path, Array.Empty<byte>());
+        }
+    }
+
+    /// <summary>Drops an item's provisional mark, ignoring failures.</summary>
+    /// <param name="itemId">The item.</param>
+    public void ClearProvisional(Guid itemId)
+    {
+        try
+        {
+            File.Delete(ProvisionalPath(itemId));
+        }
+        catch (IOException)
+        {
+        }
+        catch (UnauthorizedAccessException)
+        {
+        }
+    }
+
+    /// <summary>Whether an item's rows are live analysis only.</summary>
+    /// <param name="itemId">The item.</param>
+    /// <returns>True when marked.</returns>
+    public bool IsProvisional(Guid itemId) => File.Exists(ProvisionalPath(itemId));
 
     /// <summary>A short stable hash of a path.</summary>
     /// <param name="text">The path.</param>
@@ -62,4 +105,7 @@ public sealed class Workspace
         {
         }
     }
+
+    private string ProvisionalPath(Guid itemId)
+        => Path.Combine(_paths.DataPath, "comseg", "provisional", itemId.ToString("N", CultureInfo.InvariantCulture));
 }
