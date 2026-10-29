@@ -129,6 +129,15 @@ public sealed class ComsegSegmentProvider : IMediaSegmentProvider
             }
 
             _workspace.ClearProvisional(item.Id);
+            if (breaks.Count == 0 && existing.Count > 0)
+            {
+                // Only a provisional item gets here with rows, and those are the
+                // live analysis's. A pass that finds no breaks where it found some
+                // has most likely failed, so they stand, and later scans leave them.
+                _logger.LogWarning("Comseg: the full pass over {Name} found no breaks; keeping the {Count} live ones", item.Name, existing.Count);
+                return existing;
+            }
+
             return breaks.Select(b => new MediaSegmentDto
             {
                 ItemId = request.ItemId,

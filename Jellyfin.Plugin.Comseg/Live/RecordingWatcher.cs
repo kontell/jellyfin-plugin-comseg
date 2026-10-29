@@ -684,10 +684,22 @@ public sealed class RecordingWatcher : BackgroundService
                     return;
                 }
 
+                // A pass that finds no breaks where the live analysis found some
+                // has most likely failed (lost the channel logo, say) rather than
+                // found a programme without adverts, so the live breaks stand.
+                var kept = false;
+                if (breaks.Count == 0 && job.LiveBreaks is { Count: > 0 } live)
+                {
+                    _logger.LogWarning("Comseg: final pass over {Path} found no breaks; keeping the {Count} live ones", job.Path, live.Count);
+                    job.LastError = "the final pass found no breaks; the live ones stand";
+                    breaks = live;
+                    kept = true;
+                }
+
                 // From here on every store, this one and any repair after a
                 // prune, uses the final result.
                 job.FinalBreaks = breaks;
-                if (await ReconcileAsync(job, null).ConfigureAwait(false) == 0)
+                if (await ReconcileAsync(job, null).ConfigureAwait(false) == 0 && !kept)
                 {
                     _logger.LogInformation("Comseg: the final pass over {Name} agrees with the stored breaks", item.Name);
                 }
