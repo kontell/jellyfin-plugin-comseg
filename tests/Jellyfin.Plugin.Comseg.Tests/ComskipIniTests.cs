@@ -53,7 +53,7 @@ public class ComskipIniTests
     public void TheEmbeddedDefaultIgnoresTheBottomOfThePicture()
     {
         var text = ComskipIni.DefaultText();
-        Assert.Contains("ticker_tape=160", text);
+        Assert.Contains("ticker_tape_percentage=15", text);
         Assert.Contains("detect_method=123", text);
     }
 

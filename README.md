@@ -16,7 +16,7 @@ Dashboard → Plugins → Comseg.
 | Setting | Default | |
 | --- | --- | --- |
 | Comskip executable | `comskip` | Path or a name on the server's PATH. "Check Comskip" runs it. |
-| Comskip ini | built-in | Path of a comskip.ini of your own, anywhere the server can read; blank uses the built-in one, which sets `ticker_tape=160` to keep provider watermarks and score bugs out of the logo search. If the server finds no file at the path, runs use the built-in one; "Check Comskip" says which one they use. Whichever file is used, the plugin sets `live_tv`, `live_master_interval`, `live_tv_retries`, `output_edl`, `output_default` and `thread_count` itself, from its own settings where it has one. |
+| Comskip ini | built-in | Path of a comskip.ini of your own, anywhere the server can read; blank uses the built-in one, which sets `ticker_tape_percentage=15`, the bottom 15% of the picture, to keep provider watermarks and score bugs out of the logo search at any resolution. If the server finds no file at the path, runs use the built-in one; "Check Comskip" says which one they use. Whichever file is used, the plugin sets `live_tv`, `live_master_interval`, `live_tv_retries`, `output_edl`, `output_default` and `thread_count` itself, from its own settings where it has one. |
 | Detect while recording | on | Needs the Comseg build of Comskip. |
 | Full pass on finished recordings | on | Also what the Media Segment Scan runs. |
 | Live analysis interval | 60 s | `live_master_interval`. |
