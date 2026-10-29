@@ -46,35 +46,50 @@ public sealed class CompletedPass
     public async Task<IReadOnlyList<Break>?> RunAsync(string mediaPath, PluginConfiguration config, CancellationToken cancellationToken, string? copy = null)
     {
         var jobDir = _workspace.JobDir(config, "scan", mediaPath);
-        Directory.CreateDirectory(jobDir);
-        var iniPath = Path.Combine(jobDir, "comskip.ini");
-        await File.WriteAllTextAsync(
-            iniPath,
-            ComskipIni.Compose(ComskipIni.BaseText(config.IniPath), ComskipIni.CompletedOverrides(config)),
-            cancellationToken).ConfigureAwait(false);
-
-        var timeout = TimeSpan.FromMinutes(Math.Clamp(config.CompletedPassTimeoutMinutes, 5, 24 * 60));
-        copy ??= await _copies.PrepareAsync(mediaPath, Path.Combine(jobDir, "copy.ts"), config, timeout, cancellationToken).ConfigureAwait(false);
-        var input = copy ?? mediaPath;
-        if (copy is null)
+        try
         {
-            _logger.LogInformation("Comseg: full Comskip pass over {Media}", mediaPath);
-        }
-        else
-        {
-            _logger.LogInformation("Comseg: full Comskip pass over {Media}, through its scaled copy", mediaPath);
-        }
+            Directory.CreateDirectory(jobDir);
+            var iniPath = Path.Combine(jobDir, "comskip.ini");
+            await File.WriteAllTextAsync(
+                iniPath,
+                ComskipIni.Compose(ComskipIni.BaseText(config.IniPath), ComskipIni.CompletedOverrides(config)),
+                cancellationToken).ConfigureAwait(false);
 
-        var result = await _runner.RunAsync(config.ComskipPath, iniPath, jobDir, input, timeout, cancellationToken).ConfigureAwait(false);
-        if (!result.Ran || result.EdlPath is null)
-        {
-            return null;
-        }
+            // One time limit for the whole pass, the copy included, so a stuck
+            // encode cannot double it.
+            var deadline = DateTime.UtcNow + TimeSpan.FromMinutes(Math.Clamp(config.CompletedPassTimeoutMinutes, 5, 24 * 60));
+            copy ??= await _copies.PrepareAsync(mediaPath, Path.Combine(jobDir, "copy.ts"), config, deadline - DateTime.UtcNow, cancellationToken).ConfigureAwait(false);
+            var left = deadline - DateTime.UtcNow;
+            if (left <= TimeSpan.Zero)
+            {
+                _logger.LogWarning("Comseg: the full pass over {Media} ran out of time making its copy", mediaPath);
+                return null;
+            }
 
-        var min = Math.Max(0, config.MinBreakSeconds);
-        var breaks = EdlParser.ReadFile(result.EdlPath).Where(b => b.Length >= min).ToList();
-        _logger.LogInformation("Comseg: {Count} commercial breaks in {Media} after {Elapsed:mm\\:ss}", breaks.Count, mediaPath, result.Elapsed);
-        Workspace.TryDelete(jobDir);
-        return breaks;
+            if (copy is null)
+            {
+                _logger.LogInformation("Comseg: full Comskip pass over {Media}", mediaPath);
+            }
+            else
+            {
+                _logger.LogInformation("Comseg: full Comskip pass over {Media}, through its scaled copy", mediaPath);
+            }
+
+            var result = await _runner.RunAsync(config.ComskipPath, iniPath, jobDir, copy ?? mediaPath, left, cancellationToken).ConfigureAwait(false);
+            if (!result.Ran || result.EdlPath is null)
+            {
+                return null;
+            }
+
+            var min = Math.Max(0, config.MinBreakSeconds);
+            var breaks = EdlParser.ReadFile(result.EdlPath).Where(b => b.Length >= min).ToList();
+            _logger.LogInformation("Comseg: {Count} commercial breaks in {Media} after {Elapsed:mm\\:ss}", breaks.Count, mediaPath, result.Elapsed);
+            return breaks;
+        }
+        finally
+        {
+            // A pass that stops early leaves its files too, and a scaled copy runs to gigabytes.
+            Workspace.TryDelete(jobDir);
+        }
     }
 }

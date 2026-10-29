@@ -118,6 +118,7 @@ public sealed class ComskipRunner
         return new LiveProcess(
             process,
             tail,
+            mediaPath,
             Path.Combine(workDir, baseName + ".master.edl"),
             Path.Combine(workDir, baseName + ".edl"));
     }
@@ -217,13 +218,17 @@ public sealed class ComskipRunner
         private readonly Process _process;
         private readonly OutputTail _tail;
 
-        internal LiveProcess(Process process, OutputTail tail, string masterEdlPath, string edlPath)
+        internal LiveProcess(Process process, OutputTail tail, string mediaPath, string masterEdlPath, string edlPath)
         {
             _process = process;
             _tail = tail;
+            MediaPath = mediaPath;
             MasterEdlPath = masterEdlPath;
             EdlPath = edlPath;
         }
+
+        /// <summary>Gets the file this Comskip reads: the recording, or a scaled copy of it.</summary>
+        public string MediaPath { get; }
 
         /// <summary>Gets the periodic full-analysis output (the patched binary's &lt;base&gt;.master.edl).</summary>
         public string MasterEdlPath { get; }

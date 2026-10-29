@@ -29,11 +29,13 @@ public sealed class LiveJob
     /// <param name="path">The recording file.</param>
     /// <param name="workDir">The job folder.</param>
     /// <param name="tracker">The break tracker.</param>
-    public LiveJob(string path, string workDir, LiveBreakTracker tracker)
+    /// <param name="copy">The scaled copy, which may decide on none.</param>
+    public LiveJob(string path, string workDir, LiveBreakTracker tracker, LiveCopy copy)
     {
         Path = path;
         WorkDir = workDir;
         Tracker = tracker;
+        Copy = copy;
         StartedUtc = DateTime.UtcNow;
     }
 
@@ -59,27 +61,8 @@ public sealed class LiveJob
     /// <summary>Gets or sets the live Comskip process.</summary>
     public ComskipRunner.LiveProcess? Process { get; set; }
 
-    /// <summary>Gets or sets the scaled copy the GPU makes as the recording grows, when the live Comskip reads one.</summary>
-    public ScaledCopy.Following? Copy { get; set; }
-
-    /// <summary>Gets or sets the scaled copy's file.</summary>
-    public string? CopyPath { get; set; }
-
-    /// <summary>Gets or sets the scaled copy's height, while the live Comskip reads it.</summary>
-    public int? CopyHeight { get; set; }
-
-    /// <summary>Gets or sets a value indicating whether the scaled copy has its first frames, so the live Comskip can read it.</summary>
-    public bool CopyReady { get; set; }
-
-    /// <summary>Gets or sets when the scaled copy was started.</summary>
-    public DateTime CopyStartedUtc { get; set; }
-
-    /// <summary>Gets or sets a value indicating whether the live Comskip reads the recording itself: no copy is wanted, the recording is no taller than asked, or the copy failed.</summary>
-    public bool Direct { get; set; }
-
-    /// <summary>Gets or sets how many times probing the recording found no picture yet.</summary>
-    public int ProbeAttempts { get; set; }
-
+    /// <summary>Gets the scaled copy the live Comskip reads, when the settings ask for one.</summary>
+    public LiveCopy Copy { get; }
 
     /// <summary>Gets or sets the write time of the last analysis read.</summary>
     public DateTime LastMasterWriteUtc { get; set; }
