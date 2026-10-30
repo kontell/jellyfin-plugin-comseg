@@ -6,7 +6,7 @@ guid: "96262b59-95a6-4283-913c-e20e0967b35c"
 # version tracks the Jellyfin ABI it is built against: <server major.minor>.0.<build>.
 # The authority is the csproj's PluginVersion; this value is documentation and
 # is asserted against it at release time.
-version: "12.0.0.2"
+version: "12.0.0.3"
 targetAbi: "12.0.0.0"
 framework: "net10.0"
 owner: "kontell"
@@ -18,16 +18,14 @@ imageUrl: "https://raw.githubusercontent.com/kontell/jellyfin-plugin-comseg/main
 artifacts:
   - "Jellyfin.Plugin.Comseg.dll"
 changelog: |-
-  - The live breaks stay in place while the final pass runs: when Jellyfin
-    clears a recording's segments as the file closes, Comseg puts them
-    straight back.
-  - A final pass that never stored its result (a restart, a timeout) is run
-    again by the Media Segment Scan.
-  - Only Comseg's own Commercial rows are read or changed; rows from other
-    providers are left alone.
-  - Recordings in a library that disables the provider are not analysed.
-  - The built-in ini ignores the bottom 15% of the picture rather than 160
-    lines, which keeps the provider watermark out of the logo search on UHD
-    feeds too.
-  - Check Comskip says which ini runs use, and the extra recording folders
-    are a plain text field.
+  - Analysis height: Comskip can read a 720p or 480p copy that Jellyfin's
+    ffmpeg makes on the GPU through VA-API, while the recording runs and
+    for the final pass. Comskip reads it several times faster than the
+    recording.
+  - HDR recordings are tone mapped in that copy. Comskip could not find the
+    channel logo in an HDR picture, so it found no breaks on UHD sports
+    feeds.
+  - A full pass that finds no breaks no longer erases the breaks found
+    while the recording ran.
+  - The built-in ini keeps the channel logo through a long recording's
+    closing filler (with the Comseg build of Comskip).
