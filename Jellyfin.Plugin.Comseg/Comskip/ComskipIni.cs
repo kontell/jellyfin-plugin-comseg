@@ -82,6 +82,12 @@ public static class ComskipIni
         return new Dictionary<string, string>(StringComparer.Ordinal)
         {
             ["live_tv"] = "1",
+
+            // Wait at the end of the file for more, rather than reopen it and seek
+            // back: on a variable-bitrate recording that seek lands late often
+            // enough to lose minutes of frames an hour. Read by the Comseg build;
+            // stock Comskip ignores the key.
+            ["live_tv_follow"] = "1",
             ["live_tv_retries"] = Clamp(config.LiveTvRetries, 1, 100000),
             ["live_master_interval"] = Clamp(config.LiveMasterIntervalSeconds, 10, 3600),
             ["output_edl"] = "1",
