@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The evaluator: runs the plugin's own logic over files, outside Jellyfin,
+       and scores the result against reference break lists. Not packaged. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <JellyfinFramework Condition="'$(JellyfinFramework)' == ''">net10.0</JellyfinFramework>
+    <TargetFramework>$(JellyfinFramework)</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <AssemblyName>comseg-eval</AssemblyName>
+    <RootNamespace>Jellyfin.Plugin.Comseg.Eval</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\Jellyfin.Plugin.Comseg\Jellyfin.Plugin.Comseg.csproj" />
+  </ItemGroup>
+
+</Project>

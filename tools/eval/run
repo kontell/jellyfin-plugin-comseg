@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Run the evaluator: tools/eval/run <final|live-sim|score> [options]; no
+# arguments prints the usage. It runs the plugin's own logic over files,
+# outside Jellyfin, and scores the result against a reference break list.
+set -euo pipefail
+repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+exec dotnet run -c Release --project "$repo/eval/Jellyfin.Plugin.Comseg.Eval" -- "$@"

@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+# Serve a finished recording as a live TV channel, so a Jellyfin test server
+# can record it again as if it were on air: the same programme, as often as
+# wanted, against any build of the plugin.
+#
+#   tools/eval/replay-channel FILE DIR [--port 8195] [--name Replay] [--rate 1]
+#                                      [--start SECONDS] [--seconds SECONDS]
+#
+# FILE is remuxed, not re-encoded, into a sliding HLS playlist under DIR at
+# --rate times real time, and DIR is served on 127.0.0.1:PORT. Add
+# DIR/replay.m3u to the test server as an M3U tuner, then set a timer on the
+# channel once this is running; a recording begins at whatever is "on air" at
+# that moment. Ends when the file does, or on Ctrl-C.
+#
+# Needs ffmpeg (FFMPEG names another binary) and python3.
+set -euo pipefail
+
+file=""; dir=""; port=8195; name="Replay"; rate=1; start=""; seconds=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --port) port="$2"; shift 2 ;;
+        --name) name="$2"; shift 2 ;;
+        --rate) rate="$2"; shift 2 ;;
+        --start) start="$2"; shift 2 ;;
+        --seconds) seconds="$2"; shift 2 ;;
+        -*) echo "unknown option $1" >&2; exit 2 ;;
+        *) if [ -z "$file" ]; then file="$1"; elif [ -z "$dir" ]; then dir="$1"; else echo "unexpected argument $1" >&2; exit 2; fi; shift ;;
+    esac
+done
+if [ -z "$file" ] || [ -z "$dir" ]; then
+    sed -n '2,15p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2
+    exit 2
+fi
+
+ffmpeg="${FFMPEG:-ffmpeg}"
+mkdir -p "$dir"
+rm -f "$dir"/live.m3u8 "$dir"/s[0-9]*.ts
+cat > "$dir/replay.m3u" <<M3U
+#EXTM3U
+#EXTINF:-1 tvg-id="replay.$port" tvg-chno="$port" group-title="Replay",$name
+http://127.0.0.1:$port/live.m3u8
+M3U
+
+( cd "$dir" && exec python3 -m http.server --bind 127.0.0.1 "$port" >/dev/null 2>&1 ) &
+http=$!
+trap 'kill "$http" 2>/dev/null || true' EXIT
+
+args=(-nostdin -hide_banner -v warning -readrate "$rate")
+[ -n "$start" ] && args+=(-ss "$start")
+args+=(-i "$file")
+[ -n "$seconds" ] && args+=(-t "$seconds")
+echo "replay-channel: \"$name\" at http://127.0.0.1:$port/live.m3u8, tuner playlist $dir/replay.m3u" >&2
+"$ffmpeg" "${args[@]}" -c copy -copyts \
+    -f hls -hls_time 6 -hls_list_size 8 -hls_flags delete_segments \
+    -hls_segment_filename "$dir/s%05d.ts" "$dir/live.m3u8"
