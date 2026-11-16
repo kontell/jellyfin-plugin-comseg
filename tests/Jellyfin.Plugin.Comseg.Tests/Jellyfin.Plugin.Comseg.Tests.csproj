@@ -19,6 +19,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\Jellyfin.Plugin.Comseg\Jellyfin.Plugin.Comseg.csproj" />
+    <ProjectReference Include="..\..\eval\Jellyfin.Plugin.Comseg.Eval\Jellyfin.Plugin.Comseg.Eval.csproj" />
   </ItemGroup>
 
 </Project>
