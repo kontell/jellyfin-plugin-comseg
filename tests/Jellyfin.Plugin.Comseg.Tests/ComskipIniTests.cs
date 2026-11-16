@@ -64,6 +64,8 @@ public class ComskipIniTests
         Assert.Equal("1", overrides["live_tv"]);
         Assert.Equal("45", overrides["live_master_interval"]);
         Assert.Equal("10", overrides["live_tv_retries"]);
+        Assert.Equal("1", overrides["live_tv_follow"]);
+        Assert.False(ComskipIni.CompletedOverrides(new PluginConfiguration()).ContainsKey("live_tv_follow"));
         Assert.Equal("2", overrides["thread_count"]);
         Assert.Equal("0", ComskipIni.CompletedOverrides(new PluginConfiguration())["live_tv"]);
     }
