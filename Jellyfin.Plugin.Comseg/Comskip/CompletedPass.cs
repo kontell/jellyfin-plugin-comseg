@@ -77,6 +77,14 @@ public sealed class CompletedPass
                 ComskipIni.Compose(ComskipIni.BaseText(config.IniPath), settings.Keys, runMode),
                 cancellationToken).ConfigureAwait(false);
 
+            // A copy made while the recording was written is used only at the height
+            // the profile asks for now: the profile may have changed since.
+            if (copy is not null && !await CopyFitsAsync(mediaPath, copy, config, cancellationToken).ConfigureAwait(false))
+            {
+                _logger.LogInformation("Comseg: the copy made while {Media} recorded is not at the height its settings ask for now; the pass makes its own", mediaPath);
+                copy = null;
+            }
+
             // One time limit for the whole pass, the copy included, so a stuck
             // encode cannot double it.
             var deadline = DateTime.UtcNow + TimeSpan.FromMinutes(Math.Clamp(config.CompletedPassTimeoutMinutes, 5, 24 * 60));
@@ -121,6 +129,20 @@ public sealed class CompletedPass
         }
     }
 
+    /// <summary>Whether a ready-made copy has the height a copy made now would have.</summary>
+    private async Task<bool> CopyFitsAsync(string mediaPath, string copy, PluginConfiguration config, CancellationToken cancellationToken)
+    {
+        var wanted = ScaledCopy.Height(config);
+        if (wanted == 0)
+        {
+            return false;
+        }
+
+        var original = await _copies.ProbeAsync(mediaPath, false, cancellationToken).ConfigureAwait(false);
+        var made = await _copies.ProbeAsync(copy, false, cancellationToken).ConfigureAwait(false);
+        return original is not null && made is not null && made.Height == Math.Min(wanted, original.Height);
+    }
+
     /// <summary>
     /// Keeps Comskip's per-frame data, its logo, the ini and the breaks for a
     /// recording, under &lt;data&gt;/comseg/frames/&lt;hash of its path&gt;, replacing
@@ -132,7 +154,12 @@ public sealed class CompletedPass
         var dir = _workspace.FramesDir(mediaPath);
         try
         {
-            Workspace.TryDelete(dir);
+            // An earlier pass's files that cannot be removed would mix with this one's.
+            if (Directory.Exists(dir))
+            {
+                Directory.Delete(dir, true);
+            }
+
             Directory.CreateDirectory(dir);
             var baseName = ComskipRunner.BaseName(input);
             foreach (var (from, to) in new[]

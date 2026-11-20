@@ -16,8 +16,8 @@ public sealed record RunSettings(
     IReadOnlyDictionary<string, string> Keys,
     IReadOnlyList<string> Problems)
 {
-    /// <summary>Gets a value indicating whether the recording is analysed while it records.</summary>
-    public bool LiveDetection => Profile?.LiveDetection ?? true;
+    /// <summary>Gets a value indicating whether the recording is analysed while it records: the plugin's setting, unless the profile turns it off.</summary>
+    public bool LiveDetection => Config.EnableLiveDetection && (Profile?.LiveDetection ?? true);
 
     /// <summary>Gets a value indicating whether Comskip's per-frame data is kept after a full pass.</summary>
     public bool KeepFrames => Profile?.KeepFrames ?? false;

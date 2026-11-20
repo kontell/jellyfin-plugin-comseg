@@ -182,14 +182,19 @@
                 });
             }
 
+            // Lists may have been saved one item a line; the fields are one line, with semicolons.
+            function oneLine(value) {
+                return (value || '').split(/\r?\n/).map(function (s) { return s.trim(); }).filter(Boolean).join('; ');
+            }
+
             function renderProfiles(list) {
                 var box = document.querySelector('#comsegProfiles');
                 box.innerHTML = list.map(function (p, i) {
                     return '<div class="comsegProfile" style="border-left: 3px solid rgba(128,128,128,0.4); padding-left: 1em; margin-bottom: 1.5em;">'
                         + '<div class="inputContainer"><input is="emby-input" type="text" class="profName" label="Name" value="' + escapeHtml(p.Name || '') + '" /></div>'
-                        + '<div class="inputContainer"><input is="emby-input" type="text" class="profChannels" label="Channels" value="' + escapeHtml(p.Channels || '') + '" />'
+                        + '<div class="inputContainer"><input is="emby-input" type="text" class="profChannels" label="Channels" value="' + escapeHtml(oneLine(p.Channels)) + '" />'
                         + '<div class="fieldDescription">Channel names as Jellyfin shows them, separated by semicolons. Case and accents are ignored, and * matches any text, as in Sky Sports*.</div></div>'
-                        + '<div class="inputContainer"><input is="emby-input" type="text" class="profKeys" label="Comskip ini keys" value="' + escapeHtml(p.IniKeys || '') + '" />'
+                        + '<div class="inputContainer"><input is="emby-input" type="text" class="profKeys" label="Comskip ini keys" value="' + escapeHtml(oneLine(p.IniKeys)) + '" />'
                         + '<div class="fieldDescription">key=value pairs separated by semicolons, laid over the base ini for these channels, such as ticker_tape_percentage=0. The plugin\'s run-mode keys still win; Check Comskip lists any that are left out.</div></div>'
                         + '<div class="inputContainer"><input is="emby-input" type="number" class="profHeight" pattern="[0-9]*" min="0" max="1080" label="Analysis height (empty uses the setting above)" value="' + (p.AnalysisHeight >= 0 ? p.AnalysisHeight : '') + '" /></div>'
                         + '<div class="checkboxContainer checkboxContainer-withDescription"><label class="emby-checkbox-label"><input is="emby-checkbox" type="checkbox" class="profLive"' + (p.LiveDetection !== false ? ' checked' : '') + ' /><span>Detect while recording</span></label>'
