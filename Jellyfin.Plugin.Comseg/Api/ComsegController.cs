@@ -11,7 +11,6 @@ using MediaBrowser.Controller.Library;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.Comseg.Api;
 
@@ -24,36 +23,24 @@ public class ComsegController : ControllerBase
 {
     private readonly RecordingWatcher _watcher;
     private readonly ComskipRunner _runner;
-    private readonly CompletedPass _pass;
-    private readonly SegmentStore _store;
-    private readonly DetectionRegistry _registry;
+    private readonly OnDemandDetection _detection;
     private readonly ILibraryManager _library;
-    private readonly ILogger<ComsegController> _logger;
 
     /// <summary>Initializes a new instance of the <see cref="ComsegController"/> class.</summary>
     /// <param name="watcher">The watcher.</param>
     /// <param name="runner">The Comskip runner.</param>
-    /// <param name="pass">The full-pass runner.</param>
-    /// <param name="store">The segment store.</param>
-    /// <param name="registry">The detection registry.</param>
+    /// <param name="detection">The on-demand full pass.</param>
     /// <param name="library">The library manager.</param>
-    /// <param name="logger">The logger.</param>
     public ComsegController(
         RecordingWatcher watcher,
         ComskipRunner runner,
-        CompletedPass pass,
-        SegmentStore store,
-        DetectionRegistry registry,
-        ILibraryManager library,
-        ILogger<ComsegController> logger)
+        OnDemandDetection detection,
+        ILibraryManager library)
     {
         _watcher = watcher;
         _runner = runner;
-        _pass = pass;
-        _store = store;
-        _registry = registry;
+        _detection = detection;
         _library = library;
-        _logger = logger;
     }
 
     /// <summary>The live jobs and the configured binary.</summary>
@@ -107,34 +94,11 @@ public class ComsegController : ControllerBase
             return NotFound();
         }
 
-        if (!_registry.TryEnter(item.Id))
+        if (_detection.TryRun(item, "on-demand", CancellationToken.None) is null)
         {
             return Conflict("a detection is already running for this item");
         }
 
-        // A finished live job may still be keeping its breaks in place; this
-        // pass replaces them.
-        _watcher.StandDown(item.Id);
-        var config = ComsegPlugin.Config;
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                var breaks = await _pass.RunAsync(item.Path, config, CancellationToken.None).ConfigureAwait(false);
-                if (breaks is not null && await _store.PublishAsync(item, breaks, "on demand", final: true).ConfigureAwait(false) == 0)
-                {
-                    _logger.LogInformation("Comseg: the on-demand pass over {Name} agrees with the stored breaks", item.Name);
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Comseg: on-demand detection failed for {Name}", item.Name);
-            }
-            finally
-            {
-                _registry.Exit(item.Id);
-            }
-        });
         return Accepted();
     }
 
