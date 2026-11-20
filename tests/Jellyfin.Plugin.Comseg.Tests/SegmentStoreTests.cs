@@ -153,47 +153,4 @@ public sealed class SegmentStoreTests : IDisposable
 
         public bool HasSegments(Guid itemId) => Rows.Any(r => r.ItemId == itemId);
     }
-
-    private sealed class FakePaths : IApplicationPaths
-    {
-        public FakePaths(string root) => DataPath = root;
-
-        public string DataPath { get; }
-
-        public string ProgramDataPath => DataPath;
-
-        public string WebPath => DataPath;
-
-        public string ProgramSystemPath => DataPath;
-
-        public string ImageCachePath => DataPath;
-
-        public string PluginsPath => DataPath;
-
-        public string PluginConfigurationsPath => DataPath;
-
-        public string LogDirectoryPath => DataPath;
-
-        public string ConfigurationDirectoryPath => DataPath;
-
-        public string SystemConfigurationFilePath => DataPath;
-
-        public string CachePath => DataPath;
-
-        public string TempDirectory => DataPath;
-
-        public string VirtualDataPath => DataPath;
-
-        public string TrickplayPath => DataPath;
-
-        public string BackupPath => DataPath;
-
-        public void MakeSanityCheckOrThrow()
-        {
-        }
-
-        public void CreateAndCheckMarker(string path, string markerName, bool recursive = false)
-        {
-        }
-    }
 }

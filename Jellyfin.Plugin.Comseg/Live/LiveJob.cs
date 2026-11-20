@@ -4,6 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.Comseg.Comskip;
 using Jellyfin.Plugin.Comseg.Edl;
+using Jellyfin.Plugin.Comseg.Profiles;
 using Jellyfin.Plugin.Comseg.Segments;
 using MediaBrowser.Controller.Entities;
 
@@ -30,12 +31,14 @@ public sealed class LiveJob
     /// <param name="workDir">The job folder.</param>
     /// <param name="tracker">The break tracker.</param>
     /// <param name="copy">The scaled copy, which may decide on none.</param>
-    public LiveJob(string path, string workDir, LiveBreakTracker tracker, LiveCopy copy)
+    /// <param name="settings">The settings the recording runs with, chosen when the job started.</param>
+    public LiveJob(string path, string workDir, LiveBreakTracker tracker, LiveCopy copy, RunSettings settings)
     {
         Path = path;
         WorkDir = workDir;
         Tracker = tracker;
         Copy = copy;
+        Settings = settings;
         StartedUtc = DateTime.UtcNow;
     }
 
@@ -47,6 +50,12 @@ public sealed class LiveJob
 
     /// <summary>Gets the break tracker.</summary>
     public LiveBreakTracker Tracker { get; }
+
+    /// <summary>Gets the settings the recording runs with: its channel's profile, chosen when the job started.</summary>
+    public RunSettings Settings { get; }
+
+    /// <summary>Gets a value indicating whether a live Comskip analyses the recording; when not, the job only runs the full pass once it ends.</summary>
+    public bool AnalysesLive => Settings.LiveDetection;
 
     /// <summary>Gets when the job started.</summary>
     public DateTime StartedUtc { get; }

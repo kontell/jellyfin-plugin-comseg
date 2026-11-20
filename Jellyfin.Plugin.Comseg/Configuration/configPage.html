@@ -88,6 +88,13 @@
                         <input is="emby-input" type="text" id="txtExtraPaths" label="Extra recording folders" />
                         <div class="fieldDescription">Separate several with semicolons. Jellyfin's own recording folders are always included.</div>
                     </div>
+                    <h3>Channel profiles</h3>
+                    <div class="fieldDescription">Settings for the recordings of particular channels. A recording's channel is noted from its timer when it starts recording; the first profile that lists it applies, and recordings no profile lists run with the settings above.</div>
+                    <br />
+                    <div id="comsegProfiles"></div>
+                    <div class="inputContainer">
+                        <button is="emby-button" type="button" id="btnAddProfile" class="raised"><span>Add profile</span></button>
+                    </div>
                     <h3>Catchup</h3>
                     <div class="checkboxContainer checkboxContainer-withDescription">
                         <label class="emby-checkbox-label">
@@ -150,6 +157,7 @@
                     setValue('#txtTimeout', config.CompletedPassTimeoutMinutes);
                     // Older saves came from a multi-line box; show them on the one line.
                     setValue('#txtExtraPaths', (config.ExtraRecordingPaths || '').split(/\r?\n/).map(function (s) { return s.trim(); }).filter(Boolean).join('; '));
+                    renderProfiles(config.Profiles || []);
                     Dashboard.hideLoadingMsg();
                 });
             }
@@ -157,6 +165,56 @@
             function escapeHtml(text) {
                 return String(text).replace(/[&<>"]/g, function (c) {
                     return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+                });
+            }
+
+            function readProfiles() {
+                return Array.prototype.map.call(document.querySelectorAll('#comsegProfiles .comsegProfile'), function (el) {
+                    var height = parseInt(el.querySelector('.profHeight').value, 10);
+                    return {
+                        Name: el.querySelector('.profName').value.trim(),
+                        Channels: el.querySelector('.profChannels').value.trim(),
+                        IniKeys: el.querySelector('.profKeys').value.trim(),
+                        AnalysisHeight: isNaN(height) ? -1 : height,
+                        LiveDetection: el.querySelector('.profLive').checked,
+                        KeepFrames: el.querySelector('.profKeep').checked
+                    };
+                });
+            }
+
+            function renderProfiles(list) {
+                var box = document.querySelector('#comsegProfiles');
+                box.innerHTML = list.map(function (p, i) {
+                    return '<div class="comsegProfile" style="border-left: 3px solid rgba(128,128,128,0.4); padding-left: 1em; margin-bottom: 1.5em;">'
+                        + '<div class="inputContainer"><input is="emby-input" type="text" class="profName" label="Name" value="' + escapeHtml(p.Name || '') + '" /></div>'
+                        + '<div class="inputContainer"><input is="emby-input" type="text" class="profChannels" label="Channels" value="' + escapeHtml(p.Channels || '') + '" />'
+                        + '<div class="fieldDescription">Channel names as Jellyfin shows them, separated by semicolons. Case and accents are ignored, and * matches any text, as in Sky Sports*.</div></div>'
+                        + '<div class="inputContainer"><input is="emby-input" type="text" class="profKeys" label="Comskip ini keys" value="' + escapeHtml(p.IniKeys || '') + '" />'
+                        + '<div class="fieldDescription">key=value pairs separated by semicolons, laid over the base ini for these channels, such as ticker_tape_percentage=0. The plugin\'s run-mode keys still win; Check Comskip lists any that are left out.</div></div>'
+                        + '<div class="inputContainer"><input is="emby-input" type="number" class="profHeight" pattern="[0-9]*" min="0" max="1080" label="Analysis height (empty uses the setting above)" value="' + (p.AnalysisHeight >= 0 ? p.AnalysisHeight : '') + '" /></div>'
+                        + '<div class="checkboxContainer checkboxContainer-withDescription"><label class="emby-checkbox-label"><input is="emby-checkbox" type="checkbox" class="profLive"' + (p.LiveDetection !== false ? ' checked' : '') + ' /><span>Detect while recording</span></label>'
+                        + '<div class="fieldDescription checkboxDescription">Off: these recordings get only the full pass, once they finish.</div></div>'
+                        + '<div class="checkboxContainer checkboxContainer-withDescription"><label class="emby-checkbox-label"><input is="emby-checkbox" type="checkbox" class="profKeep"' + (p.KeepFrames ? ' checked' : '') + ' /><span>Keep Comskip\'s per-frame data</span></label>'
+                        + '<div class="fieldDescription checkboxDescription">After each full pass, keep Comskip\'s .csv, logo file, ini and breaks in the comseg/frames folder under Jellyfin\'s data directory, for tuning: about 16 MB an hour of recording.</div></div>'
+                        + '<div>'
+                        + (i > 0 ? '<button is="emby-button" type="button" class="raised profUp" data-index="' + i + '"><span>Move up</span></button> ' : '')
+                        + '<button is="emby-button" type="button" class="raised profRemove" data-index="' + i + '"><span>Remove</span></button>'
+                        + '</div></div>';
+                }).join('');
+                Array.prototype.forEach.call(box.querySelectorAll('.profRemove'), function (b) {
+                    b.addEventListener('click', function () {
+                        var list = readProfiles();
+                        list.splice(parseInt(b.getAttribute('data-index'), 10), 1);
+                        renderProfiles(list);
+                    });
+                });
+                Array.prototype.forEach.call(box.querySelectorAll('.profUp'), function (b) {
+                    b.addEventListener('click', function () {
+                        var list = readProfiles();
+                        var i = parseInt(b.getAttribute('data-index'), 10);
+                        list.splice(i - 1, 0, list.splice(i, 1)[0]);
+                        renderProfiles(list);
+                    });
                 });
             }
 
@@ -168,7 +226,10 @@
                         return;
                     }
                     var rows = s.Jobs.map(function (j) {
-                        return '<li>' + escapeHtml(j.Name || j.Path) + ' — analyses: ' + j.Analyses
+                        return '<li>' + escapeHtml(j.Name || j.Path)
+                            + (j.Channel ? ' (' + escapeHtml(j.Channel) + (j.Profile ? ', profile ' + escapeHtml(j.Profile) : '') + ')' : '')
+                            + (j.LiveDetection ? '' : ' — live detection off for this channel; the full pass runs when it ends')
+                            + ' — analyses: ' + j.Analyses
                             + ', confirmed breaks: ' + j.Confirmed
                             + ', published breaks: ' + j.Published
                             + (j.ItemId ? '' : ', no library item yet')
@@ -187,12 +248,17 @@
 
             page.addEventListener('pageshow', function () { load(); status(); });
             document.querySelector('#btnRefresh').addEventListener('click', status);
+            document.querySelector('#btnAddProfile').addEventListener('click', function () {
+                var list = readProfiles();
+                list.push({ Name: '', Channels: '', IniKeys: '', AnalysisHeight: -1, LiveDetection: true, KeepFrames: false });
+                renderProfiles(list);
+            });
 
             document.querySelector('#btnCheck').addEventListener('click', function () {
                 var out = document.querySelector('#checkResult');
                 out.textContent = 'Running…';
                 ApiClient.ajax({ type: 'POST', url: ApiClient.getUrl('Comseg/Check'), dataType: 'json' }).then(function (r) {
-                    out.innerHTML = escapeHtml((r.Ok ? 'OK: ' : 'Failed: ') + r.Text) + (r.Ini ? '<br />' + escapeHtml(r.Ini) : '');
+                    out.innerHTML = escapeHtml((r.Ok ? 'OK: ' : 'Failed: ') + r.Text) + (r.Ini ? '<br />' + escapeHtml(r.Ini) : '') + (r.Profiles ? '<br />' + escapeHtml(r.Profiles) : '');
                 }).catch(function () {
                     out.textContent = 'The check request failed.';
                 });
@@ -221,6 +287,7 @@
                     config.PollSeconds = num('#txtPoll', 15);
                     config.CompletedPassTimeoutMinutes = num('#txtTimeout', 90);
                     config.ExtraRecordingPaths = document.querySelector('#txtExtraPaths').value;
+                    config.Profiles = readProfiles();
                     ApiClient.updatePluginConfiguration(pluginId, config).then(function (result) {
                         Dashboard.processPluginConfigurationUpdateResult(result);
                     });
