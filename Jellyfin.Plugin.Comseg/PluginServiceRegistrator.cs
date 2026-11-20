@@ -33,6 +33,7 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddSingleton<SegmentStore>();
         serviceCollection.AddSingleton<RecordingWatcher>();
         serviceCollection.AddHostedService(provider => provider.GetRequiredService<RecordingWatcher>());
+        serviceCollection.AddSingleton<OnDemandDetection>();
         serviceCollection.AddSingleton<IMediaSegmentProvider, ComsegSegmentProvider>();
     }
 }
