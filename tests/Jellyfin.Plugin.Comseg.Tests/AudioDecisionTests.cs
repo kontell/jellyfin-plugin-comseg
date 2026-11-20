@@ -241,6 +241,14 @@ public class AudioDecisionTests
 
             File.WriteAllText(path, "logo=found\n");
             Assert.False(Jellyfin.Plugin.Comseg.Comskip.AnalysisStatus.Read(path, last)!.WithoutLogo);
+
+            // There but not readable (a folder where the file should be stands in for an access error).
+            File.Delete(path);
+            Directory.CreateDirectory(path);
+            Assert.Same(last, Jellyfin.Plugin.Comseg.Comskip.AnalysisStatus.Read(path, last));
+
+            // Its folder gone: nothing written.
+            Assert.Null(Jellyfin.Plugin.Comseg.Comskip.AnalysisStatus.Read(Path.Combine(dir, "gone", "rec.master.status"), last));
         }
         finally
         {

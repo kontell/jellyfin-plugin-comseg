@@ -668,6 +668,24 @@ public sealed class RecordingWatcher : BackgroundService
             return;
         }
 
+        await HearAsync(job, audio, cancellationToken).ConfigureAwait(false);
+
+        // Decide every poll, heard or not: a new analysis reaches the rows even while
+        // fingerprinting fails or ffmpeg's check times out. A missing muxer has dropped
+        // the shadow by now, which hands publishing back to the tracker.
+        if (job.Audio is not null && audio.Decide(job.Settings.Config.MinBreakSeconds))
+        {
+            _logger.LogInformation(
+                job.PublishesAudio ? "Comseg: audio decision for {Name}: publishes {Shadow}; Comskip's analyses alone gave {Published}" : "Comseg: shadow of {Name}: would publish {Shadow}; published {Published}",
+                job.Item?.Name ?? Path.GetFileName(job.Path),
+                AudioShadow.Describe(audio.Rows),
+                job.Tracker.Confirmed.Count == 0 ? "no breaks" : string.Join(", ", job.Tracker.Confirmed.Select(b => string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0:0}-{1:0}", b.Start, b.End))));
+        }
+    }
+
+    /// <summary>Fingerprints the recording's newest audio and hands it to the shadow, when ffmpeg can.</summary>
+    private async Task HearAsync(LiveJob job, AudioShadow audio, CancellationToken cancellationToken)
+    {
         try
         {
             if (!await _fingerprinter.AvailableAsync(cancellationToken).ConfigureAwait(false))
@@ -705,16 +723,6 @@ public sealed class RecordingWatcher : BackgroundService
         {
             job.AudioError = "listening failed: " + ex.Message;
             _logger.LogWarning(ex, "Comseg: listening to {Path} failed", job.Path);
-        }
-
-        // Decide every poll, heard or not: a new analysis reaches the rows even while fingerprinting fails.
-        if (job.Audio is not null && audio.Decide(job.Settings.Config.MinBreakSeconds))
-        {
-            _logger.LogInformation(
-                job.PublishesAudio ? "Comseg: audio decision for {Name}: publishes {Shadow}; Comskip's analyses alone gave {Published}" : "Comseg: shadow of {Name}: would publish {Shadow}; published {Published}",
-                job.Item?.Name ?? Path.GetFileName(job.Path),
-                AudioShadow.Describe(audio.Rows),
-                job.Tracker.Confirmed.Count == 0 ? "no breaks" : string.Join(", ", job.Tracker.Confirmed.Select(b => string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0:0}-{1:0}", b.Start, b.End))));
         }
     }
 
