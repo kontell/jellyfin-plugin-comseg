@@ -25,10 +25,7 @@ public static class FinalPass
     /// <param name="runMode">The run-mode keys.</param>
     /// <returns>The ini text.</returns>
     public static string Ini(PluginConfiguration config, IReadOnlyDictionary<string, string> keys, IReadOnlyDictionary<string, string> runMode)
-    {
-        var layered = ComskipIni.Compose(ComskipIni.BaseText(config.IniPath), keys);
-        return ComskipIni.Compose(layered, runMode);
-    }
+        => ComskipIni.Compose(ComskipIni.BaseText(config.IniPath), keys, runMode);
 
     /// <summary>Runs the pass.</summary>
     /// <param name="media">The file Comskip reads.</param>

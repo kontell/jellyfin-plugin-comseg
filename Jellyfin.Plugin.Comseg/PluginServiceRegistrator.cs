@@ -1,6 +1,7 @@
 using Jellyfin.Plugin.Comseg.Catchup;
 using Jellyfin.Plugin.Comseg.Comskip;
 using Jellyfin.Plugin.Comseg.Live;
+using Jellyfin.Plugin.Comseg.Profiles;
 using Jellyfin.Plugin.Comseg.Providers;
 using Jellyfin.Plugin.Comseg.Segments;
 using MediaBrowser.Controller;
@@ -27,6 +28,8 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
     {
         serviceCollection.AddSingleton<ComskipRunner>();
         serviceCollection.AddSingleton<Workspace>();
+        serviceCollection.AddSingleton<RecordingRecords>();
+        serviceCollection.AddSingleton<ProfileSelector>();
         serviceCollection.AddSingleton<ScaledCopy>();
         serviceCollection.AddSingleton<CompletedPass>();
         serviceCollection.AddSingleton<RecordingPaths>();

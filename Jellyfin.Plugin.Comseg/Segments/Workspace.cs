@@ -45,6 +45,12 @@ public sealed class Workspace
     public string JobDir(PluginConfiguration config, string kind, string mediaPath)
         => Path.Combine(Root(config), kind, Hash(mediaPath));
 
+    /// <summary>Where a recording's kept per-frame data goes: under the data path, so it outlives a work directory on tmpfs.</summary>
+    /// <param name="mediaPath">The recording.</param>
+    /// <returns>The folder path.</returns>
+    public string FramesDir(string mediaPath)
+        => Path.Combine(_paths.DataPath, "comseg", "frames", Hash(mediaPath));
+
     /// <summary>Marks an item's rows as live analysis only.</summary>
     /// <param name="itemId">The item.</param>
     public void MarkProvisional(Guid itemId)

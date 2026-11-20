@@ -8,12 +8,14 @@ using System.Threading.Tasks;
 using Jellyfin.Plugin.Comseg.Comskip;
 using Jellyfin.Plugin.Comseg.Configuration;
 using Jellyfin.Plugin.Comseg.Edl;
+using Jellyfin.Plugin.Comseg.Profiles;
 using Jellyfin.Plugin.Comseg.Providers;
 using Jellyfin.Plugin.Comseg.Segments;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.LiveTv;
 using MediaBrowser.Controller.Providers;
+using MediaBrowser.Model.Dto;
 using MediaBrowser.Model.IO;
 using MediaBrowser.Model.LiveTv;
 using Microsoft.Extensions.Hosting;
@@ -64,12 +66,17 @@ public sealed class RecordingWatcher : BackgroundService
     private readonly SegmentStore _store;
     private readonly Workspace _workspace;
     private readonly DetectionRegistry _registry;
+    private readonly RecordingRecords _records;
+    private readonly ProfileSelector _profiles;
     private readonly ILogger<RecordingWatcher> _logger;
     private readonly ConcurrentDictionary<string, LiveJob> _jobs = new(StringComparer.Ordinal);
     private readonly SemaphoreSlim _finalizations = new(1, 1);
 
     /// <summary>Recordings in progress left alone because their library disables the provider; the poll loop's own.</summary>
     private readonly HashSet<string> _optedOut = new(StringComparer.Ordinal);
+
+    /// <summary>Recordings in progress whose record this run of the server has written or found; the poll loop's own.</summary>
+    private readonly HashSet<string> _recorded = new(StringComparer.Ordinal);
 
     /// <summary>Initializes a new instance of the <see cref="RecordingWatcher"/> class.</summary>
     /// <param name="liveTv">The Live TV manager.</param>
@@ -83,6 +90,8 @@ public sealed class RecordingWatcher : BackgroundService
     /// <param name="store">The segment store.</param>
     /// <param name="workspace">The workspace.</param>
     /// <param name="registry">The detection registry.</param>
+    /// <param name="records">The recording records.</param>
+    /// <param name="profiles">The channel profiles.</param>
     /// <param name="logger">The logger.</param>
     public RecordingWatcher(
         ILiveTvManager liveTv,
@@ -96,6 +105,8 @@ public sealed class RecordingWatcher : BackgroundService
         SegmentStore store,
         Workspace workspace,
         DetectionRegistry registry,
+        RecordingRecords records,
+        ProfileSelector profiles,
         ILogger<RecordingWatcher> logger)
     {
         _liveTv = liveTv;
@@ -109,6 +120,8 @@ public sealed class RecordingWatcher : BackgroundService
         _store = store;
         _workspace = workspace;
         _registry = registry;
+        _records = records;
+        _profiles = profiles;
         _logger = logger;
     }
 
@@ -188,6 +201,12 @@ public sealed class RecordingWatcher : BackgroundService
         _library.ItemRemoved += OnItemRemoved;
         try
         {
+            var swept = _records.Sweep();
+            if (swept > 0)
+            {
+                _logger.LogInformation("Comseg: dropped the records of {Count} recordings that are gone", swept);
+            }
+
             _logger.LogInformation("Comseg: watching for recordings in progress (live detection {State})", ComsegPlugin.Config.EnableLiveDetection ? "on" : "off");
             while (!stoppingToken.IsCancellationRequested)
             {
@@ -243,8 +262,14 @@ public sealed class RecordingWatcher : BackgroundService
 
     private async Task PollOnceAsync(PluginConfiguration config, CancellationToken cancellationToken)
     {
-        var active = await ActivePathsAsync(cancellationToken).ConfigureAwait(false);
+        var timers = await ActiveRecordingsAsync(cancellationToken).ConfigureAwait(false);
+        var active = timers.Keys.ToHashSet(StringComparer.Ordinal);
         _optedOut.IntersectWith(active);
+        _recorded.IntersectWith(active);
+        foreach (var (path, timer) in timers)
+        {
+            RecordChannel(path, timer);
+        }
 
         if (config.EnableLiveDetection)
         {
@@ -252,17 +277,33 @@ public sealed class RecordingWatcher : BackgroundService
             {
                 if (!_jobs.TryGetValue(path, out var job))
                 {
-                    // A finished job only keeps its rows in place; it runs no Comskip.
-                    if (_jobs.Values.Count(j => !j.Finished) >= Math.Max(1, config.MaxConcurrentLive) || !FileReady(path) || IsOptedOut(path))
+                    // A finished job only keeps its rows in place, and a job whose
+                    // profile turns live analysis off only waits for the end: neither
+                    // runs a Comskip.
+                    if (!FileReady(path) || IsOptedOut(path))
                     {
                         continue;
                     }
 
-                    var workDir = _workspace.JobDir(config, "live", path);
-                    var copy = new LiveCopy(_copies, _logger, path, Path.Combine(workDir, "copy.ts"), ScaledCopy.Height(config));
-                    job = new LiveJob(path, workDir, new LiveBreakTracker(config.ConfirmPasses, config.MinBreakSeconds), copy);
+                    var settings = _profiles.For(path, config);
+                    if (settings.LiveDetection && _jobs.Values.Count(j => !j.Finished && j.AnalysesLive) >= Math.Max(1, config.MaxConcurrentLive))
+                    {
+                        continue;
+                    }
+
+                    var run = settings.Config;
+                    var workDir = _workspace.JobDir(run, "live", path);
+                    var copy = new LiveCopy(_copies, _logger, path, Path.Combine(workDir, "copy.ts"), settings.LiveDetection ? ScaledCopy.Height(run) : 0);
+                    job = new LiveJob(path, workDir, new LiveBreakTracker(run.ConfirmPasses, run.MinBreakSeconds), copy, settings);
                     _jobs[path] = job;
-                    _logger.LogInformation("Comseg: recording in progress, starting live detection on {Path}", path);
+                    if (settings.LiveDetection)
+                    {
+                        _logger.LogInformation("Comseg: recording in progress, starting live detection on {Path} ({Settings})", path, settings.Description);
+                    }
+                    else
+                    {
+                        _logger.LogInformation("Comseg: recording in progress on {Path} ({Settings}); its profile turns live detection off, so it gets the full pass when it ends", path, settings.Description);
+                    }
                 }
 
                 if (job.Finalization is not null)
@@ -272,7 +313,7 @@ public sealed class RecordingWatcher : BackgroundService
 
                 try
                 {
-                    await ServiceJobAsync(job, config, cancellationToken).ConfigureAwait(false);
+                    await ServiceJobAsync(job, cancellationToken).ConfigureAwait(false);
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
@@ -363,9 +404,36 @@ public sealed class RecordingWatcher : BackgroundService
         _logger.LogDebug("Comseg: done with {Path}", job.Path);
     }
 
-    private async Task<HashSet<string>> ActivePathsAsync(CancellationToken cancellationToken)
+    /// <summary>
+    /// Writes down the channel of a recording in progress, once: a finished
+    /// recording carries no channel, so this is what its later passes go by.
+    /// A record already there (an admin's, or this recording's from before a
+    /// restart) is kept.
+    /// </summary>
+    private void RecordChannel(string path, TimerInfoDto timer)
     {
-        var paths = new HashSet<string>(StringComparer.Ordinal);
+        if (string.IsNullOrWhiteSpace(timer.ChannelName) || !_recorded.Add(path))
+        {
+            return;
+        }
+
+        var record = new RecordingRecord(
+            path,
+            timer.ChannelName.Trim(),
+            timer.ChannelId == Guid.Empty ? null : timer.ChannelId.ToString("N", System.Globalization.CultureInfo.InvariantCulture),
+            timer.Name,
+            timer.StartDate == default ? null : timer.StartDate,
+            "timer");
+        if (_records.SaveIfMissing(record))
+        {
+            _logger.LogDebug("Comseg: {Path} is recording from {Channel}", path, record.ChannelName);
+        }
+    }
+
+    /// <summary>The recordings in progress, by file, with their timers.</summary>
+    private async Task<Dictionary<string, TimerInfoDto>> ActiveRecordingsAsync(CancellationToken cancellationToken)
+    {
+        var paths = new Dictionary<string, TimerInfoDto>(StringComparer.Ordinal);
         var timers = await _liveTv.GetTimers(new TimerQuery { IsActive = true }, cancellationToken).ConfigureAwait(false);
         foreach (var timer in timers.Items)
         {
@@ -386,7 +454,7 @@ public sealed class RecordingWatcher : BackgroundService
             var path = _recordings.GetActiveRecordingPath(timerId);
             if (!string.IsNullOrEmpty(path))
             {
-                paths.Add(path);
+                paths[path] = timer;
             }
             else
             {
@@ -418,11 +486,14 @@ public sealed class RecordingWatcher : BackgroundService
         return optedOut;
     }
 
-    private async Task ServiceJobAsync(LiveJob job, PluginConfiguration config, CancellationToken cancellationToken)
+    private async Task ServiceJobAsync(LiveJob job, CancellationToken cancellationToken)
     {
         try
         {
-            await StartComskipAsync(job, config, cancellationToken).ConfigureAwait(false);
+            if (job.AnalysesLive)
+            {
+                await StartComskipAsync(job, cancellationToken).ConfigureAwait(false);
+            }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -456,9 +527,14 @@ public sealed class RecordingWatcher : BackgroundService
         await ReconcileAsync(job, null).ConfigureAwait(false);
     }
 
-    /// <summary>Starts the live Comskip, or restarts it (twice at most) when it exited while the recording still runs.</summary>
-    private async Task StartComskipAsync(LiveJob job, PluginConfiguration config, CancellationToken cancellationToken)
+    /// <summary>
+    /// Starts the live Comskip, or restarts it (twice at most) when it exited
+    /// while the recording still runs, with the settings chosen when the job
+    /// started: base ini, the channel profile's keys, then the live keys.
+    /// </summary>
+    private async Task StartComskipAsync(LiveJob job, CancellationToken cancellationToken)
     {
+        var config = job.Settings.Config;
         var input = await job.Copy.InputAsync(config, cancellationToken).ConfigureAwait(false);
         if (job.Process is { } reading && reading.MediaPath != input)
         {
@@ -484,7 +560,7 @@ public sealed class RecordingWatcher : BackgroundService
         var iniPath = Path.Combine(job.WorkDir, "live.ini");
         await File.WriteAllTextAsync(
             iniPath,
-            ComskipIni.Compose(ComskipIni.BaseText(config.IniPath), ComskipIni.LiveOverrides(config)),
+            ComskipIni.Compose(ComskipIni.BaseText(config.IniPath), job.Settings.Keys, ComskipIni.LiveOverrides(config)),
             cancellationToken).ConfigureAwait(false);
         job.Process = _runner.StartLive(config.ComskipPath, iniPath, job.WorkDir, input);
         if (job.Process is null)

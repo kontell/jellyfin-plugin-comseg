@@ -32,6 +32,25 @@ Dashboard → Plugins → Comseg.
 
 Jellyfin's own per-library setting *Disabled media segment providers* turns the plugin off for a library: recordings there are not analysed, and rows stored earlier are read only while the provider is enabled there.
 
+## Channel profiles
+
+Channels differ: where the logo sits, what the provider burns into the picture, whether live analysis is worth its cost. A channel profile changes the settings for the recordings of the channels it lists, under *Channel profiles* on the settings page.
+
+A finished Jellyfin recording does not say which channel it came from, so the plugin notes the channel from the recording's timer when it starts recording, and from the request for a catchup download. Every later pass over the file, the final one, the Media Segment Scan's or one asked for, uses the profile of that channel. The first profile that lists the channel applies; a recording that no profile lists, or whose channel the plugin never saw, runs with the settings above. For recordings made before the plugin noted channels, an admin can set the channel through the API below.
+
+| Profile setting | |
+| --- | --- |
+| Channels | Channel names as Jellyfin shows them, separated by semicolons. Case and accents are ignored, so `RTÉ One` also matches a channel the playlist calls `RTE One`, and `*` matches any text, as in `Sky Sports*`. |
+| Comskip ini keys | `key=value` pairs separated by semicolons, laid over the base ini for these channels. The run-mode keys the plugin sets are applied after them and win; *Check Comskip* lists any key a profile sets that is left out for that reason. |
+| Analysis height | Overrides the setting above for these channels; empty uses it. |
+| Detect while recording | Off: these recordings get only the full pass, once they finish. |
+| Keep Comskip's per-frame data | After each full pass, keeps Comskip's frame data (`.csv`), its logo file, the ini and the breaks in `comseg/frames` under Jellyfin's data directory, one folder per recording: about 16 MB an hour. Comskip replays the `.csv` without decoding, which makes trying settings on a recording cheap. |
+
+Keys that have mattered:
+
+- **A logo at the bottom of the picture**, as on RTÉ News: the built-in `ticker_tape_percentage=15` hides it, Comskip settles on something else or on no logo, and breaks are missed. `ticker_tape_percentage=0` for those channels.
+- **A provider watermark in a bottom corner**, as on some IPTV sports feeds: keep the built-in mask, or Comskip takes the watermark, which stays on through the adverts, for the logo.
+
 ## Catchup
 
 A client can ask the server to save a programme that has already aired from the IPTV provider's catchup archive into the recordings, as if it had been recorded. The Catchup Download add-on for Kodi does this from the TV guide's context menu.
@@ -56,6 +75,8 @@ These need permission to manage live TV recordings. The request body is `Channel
 GET  /Comseg/Status          live jobs and the configured binary
 POST /Comseg/Check           run the configured Comskip with --help
 POST /Comseg/Detect/{itemId} queue a full pass over a finished recording (202)
+GET  /Comseg/Recording/{itemId}          the recording's channel, profile and the settings its passes use
+POST /Comseg/Recording/{itemId}/Channel  set the recording's channel: {"ChannelName": "RTE One"}; empty forgets it
 ```
 
 Clients read segments through Jellyfin's own `GET /MediaSegments/{itemId}?includeSegmentTypes=Commercial`. Rows are replaced rather than edited when a break changes, so re-fetch by item; never cache by segment id.

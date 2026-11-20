@@ -11,6 +11,7 @@ using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
 using Jellyfin.Data.Enums;
+using Jellyfin.Plugin.Comseg.Profiles;
 using Jellyfin.Plugin.Comseg.Segments;
 using MediaBrowser.Common.Configuration;
 using MediaBrowser.Common.Net;
@@ -70,6 +71,7 @@ public sealed class CatchupQueue : BackgroundService
     private readonly IHttpClientFactory _http;
     private readonly RecordingPaths _paths;
     private readonly OnDemandDetection _detection;
+    private readonly RecordingRecords _records;
     private readonly ILogger<CatchupQueue> _logger;
     private readonly Channel<CatchupJob> _queue = Channel.CreateUnbounded<CatchupJob>();
     private readonly ConcurrentDictionary<Guid, CatchupJob> _jobs = new();
@@ -86,6 +88,7 @@ public sealed class CatchupQueue : BackgroundService
     /// <param name="http">The HTTP client factory.</param>
     /// <param name="paths">The recording paths.</param>
     /// <param name="detection">The full pass.</param>
+    /// <param name="records">The recording records, where the programme's channel is written down.</param>
     /// <param name="logger">The logger.</param>
     public CatchupQueue(
         ILiveTvManager liveTv,
@@ -98,6 +101,7 @@ public sealed class CatchupQueue : BackgroundService
         IHttpClientFactory http,
         RecordingPaths paths,
         OnDemandDetection detection,
+        RecordingRecords records,
         ILogger<CatchupQueue> logger)
     {
         _liveTv = liveTv;
@@ -110,6 +114,7 @@ public sealed class CatchupQueue : BackgroundService
         _http = http;
         _paths = paths;
         _detection = detection;
+        _records = records;
         _logger = logger;
     }
 
@@ -315,6 +320,9 @@ public sealed class CatchupQueue : BackgroundService
         await File.WriteAllBytesAsync(Path.Combine(folder, "movie.nfo"), RecordingFiles.MovieNfo(request.Title!, request.Plot, request.StartUtc, poster), cancellationToken).ConfigureAwait(false);
         await File.WriteAllBytesAsync(fileBase + ".nfo", RecordingFiles.FileNfo(request.Title!, request.Plot, request.StartUtc), cancellationToken).ConfigureAwait(false);
         _logger.LogInformation("Comseg: saved {Title} from the archive as {Path}", request.Title, target);
+
+        // The channel profile of the full pass, and of any later one, goes by this.
+        _records.Save(new RecordingRecord(target, entry.Name, null, request.Title, request.StartUtc, "catchup"));
 
         var item = await WaitForItemAsync(target, cancellationToken).ConfigureAwait(false);
         if (item is null)

@@ -64,4 +64,13 @@ public class PluginConfiguration : BasePluginConfiguration
 
     /// <summary>Gets or sets how many hours a catchup download waits for Jellyfin to stop using the IPTV connection before it gives up.</summary>
     public int CatchupMaxWaitHours { get; set; } = 12;
+
+    /// <summary>Gets or sets the channel profiles, in the order they are tried.</summary>
+#pragma warning disable CA1819 // The plugin configuration is XML-serialised, which needs a settable array.
+    public ChannelProfile[] Profiles { get; set; } = [];
+#pragma warning restore CA1819
+
+    /// <summary>A copy whose changes do not reach the saved configuration, for applying a profile to one run.</summary>
+    /// <returns>The copy.</returns>
+    public PluginConfiguration Copy() => (PluginConfiguration)MemberwiseClone();
 }

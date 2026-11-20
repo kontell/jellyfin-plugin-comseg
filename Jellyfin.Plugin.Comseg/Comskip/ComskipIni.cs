@@ -20,6 +20,13 @@ public static class ComskipIni
 {
     private const string ResourceName = "Jellyfin.Plugin.Comseg.Comskip.comskip.ini";
 
+    /// <summary>The keys that make Comskip keep its per-frame data: the .csv, and the logo file it deletes otherwise.</summary>
+    public static readonly IReadOnlyDictionary<string, string> KeepFramesKeys = new Dictionary<string, string>(StringComparer.Ordinal)
+    {
+        ["output_framearray"] = "1",
+        ["delete_logo_file"] = "0",
+    };
+
     /// <summary>Gets the embedded default ini.</summary>
     /// <returns>The ini text.</returns>
     public static string DefaultText()
@@ -110,11 +117,28 @@ public static class ComskipIni
         };
     }
 
+    /// <summary>
+    /// Composes a run's ini in three layers: the base ini, then a channel
+    /// profile's keys, then the run-mode keys, which win. Without profile keys
+    /// the result is exactly the two-layer one.
+    /// </summary>
+    /// <param name="baseText">The base ini.</param>
+    /// <param name="profileKeys">The channel profile's keys.</param>
+    /// <param name="runMode">The run-mode keys.</param>
+    /// <returns>The composed ini.</returns>
+    public static string Compose(string baseText, IReadOnlyDictionary<string, string> profileKeys, IReadOnlyDictionary<string, string> runMode)
+        => profileKeys.Count == 0
+            ? Compose(baseText, runMode)
+            : Compose(Compose(baseText, profileKeys, "channel profile"), runMode);
+
     /// <summary>Applies overrides to an ini text.</summary>
     /// <param name="baseText">The base ini.</param>
     /// <param name="overrides">Keys to force.</param>
     /// <returns>The composed ini.</returns>
     public static string Compose(string baseText, IReadOnlyDictionary<string, string> overrides)
+        => Compose(baseText, overrides, "comseg run settings");
+
+    private static string Compose(string baseText, IReadOnlyDictionary<string, string> overrides, string heading)
     {
         var builder = new StringBuilder();
         foreach (var rawLine in baseText.Split('\n'))
@@ -129,7 +153,7 @@ public static class ComskipIni
             builder.Append(line).Append('\n');
         }
 
-        builder.Append("\n; comseg run settings\n");
+        builder.Append("\n; ").Append(heading).Append('\n');
         foreach (var pair in overrides.OrderBy(p => p.Key, StringComparer.Ordinal))
         {
             builder.Append(pair.Key).Append('=').Append(pair.Value).Append('\n');
