@@ -38,6 +38,9 @@ public sealed class AudioEvidence
     private readonly List<AudioSpan> _programme = [];
     private readonly List<AudioEdge> _edges = [];
 
+    /// <summary>The advert matches as found, joined only where they overlap: a match found again by a later search is one match, two adverts back to back are two.</summary>
+    private readonly List<AudioSpan> _advertMatches = [];
+
     /// <summary>Gets the stretches heard only as adverts, in order, conflicts removed.</summary>
     public IReadOnlyList<AudioSpan> Adverts => Without(_adverts, _programme);
 
@@ -55,6 +58,10 @@ public sealed class AudioEvidence
         foreach (var span in spans)
         {
             Join(span.Kind == AudioKind.Advert ? _adverts : _programme, span);
+            if (span.Kind == AudioKind.Advert)
+            {
+                Join(_advertMatches, span, 0);
+            }
         }
 
         foreach (var edge in edges)
@@ -67,13 +74,19 @@ public sealed class AudioEvidence
         }
     }
 
-    private static void Join(List<AudioSpan> list, AudioSpan span)
+    /// <summary>How many separate advert matches fall in a stretch, counted before conflicting programme audio splits any of them.</summary>
+    /// <param name="start">The stretch's start.</param>
+    /// <param name="end">Its end.</param>
+    /// <returns>The count.</returns>
+    public int AdvertMatchesIn(double start, double end) => _advertMatches.Count(m => m.Start < end && start < m.End);
+
+    private static void Join(List<AudioSpan> list, AudioSpan span, double slack = 1)
     {
         var start = span.Start;
         var end = span.End;
         for (var i = list.Count - 1; i >= 0; i--)
         {
-            if (list[i].Start <= end + 1 && start <= list[i].End + 1)
+            if (list[i].Start < end + slack && start < list[i].End + slack)
             {
                 start = Math.Min(start, list[i].Start);
                 end = Math.Max(end, list[i].End);

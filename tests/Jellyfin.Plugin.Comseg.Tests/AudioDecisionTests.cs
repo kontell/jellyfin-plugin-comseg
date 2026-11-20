@@ -1,8 +1,10 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using Jellyfin.Plugin.Comseg.Audio;
 using Jellyfin.Plugin.Comseg.Edl;
+using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
 namespace Jellyfin.Plugin.Comseg.Tests;
@@ -131,5 +133,49 @@ public class AudioDecisionTests
         Assert.InRange(advert.End, 429, 431);
         // 10 s into the stored break: the recording's break started 10 s before it.
         Assert.Contains(listener.Evidence.Edges, e => e.IsStart && Math.Abs(e.At - 390) < 1.5);
+    }
+
+    [Fact]
+    public void OneAdvertMatchSplitByProgrammeAudioIsStillOneMatch()
+    {
+        var evidence = Evidence([Advert(100, 160), new AudioSpan(125, 135, AudioKind.Programme)]);
+        Assert.Equal(2, evidence.Adverts.Count);
+        Assert.Equal(1, evidence.AdvertMatchesIn(100, 160));
+        Assert.Empty(ShadowDecision.Decide(null, null, evidence, 20));
+    }
+
+    [Fact]
+    public void ABreakNewInThisAnalysisKeepsItsEnd()
+    {
+        // Nothing in the analysis before matches it: it is not a growing one.
+        var rows = ShadowDecision.Decide([new Break(1000, 1120)], [new Break(400, 500)], new AudioEvidence(), 20);
+        Assert.Equal(new Break(1000, 1120), rows.Single().Break);
+        rows = ShadowDecision.Decide([new Break(1000, 1120)], [], new AudioEvidence(), 20);
+        Assert.Equal(new Break(1000, 1120), rows.Single().Break);
+    }
+
+    [Fact]
+    public void ChannelsKeepApartAndOldAudioIsNotUsed()
+    {
+        Assert.NotEqual(AudioStore.Key("央视一套"), AudioStore.Key("央视二套"));
+        Assert.Equal(AudioStore.Key("RTÉ One"), AudioStore.Key(" RTÉ One "));
+        Assert.StartsWith("rte-one-", AudioStore.Key("RTÉ One"), StringComparison.Ordinal);
+
+        var root = Path.Combine(Path.GetTempPath(), "comseg-audio-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var store = new AudioStore(new FakePaths(root), NullLogger<AudioStore>.Instance);
+            var items = AudioMatchTests.Noise(100, 1);
+            store.Add(new StoredRecordingInfo("/a.ts", "ITV 1", DateTime.UtcNow.AddDays(-1), DateTime.UtcNow, 12, []), items);
+            store.Add(new StoredRecordingInfo("/b.ts", "ITV 1", DateTime.UtcNow.AddDays(-50), DateTime.UtcNow, 12, []), items);
+            Assert.Equal(["/a.ts"], store.Load("ITV 1").Select(r => r.Info.Path));
+            Assert.Equal(1, store.Count("ITV 1"));
+            Assert.Empty(store.Load("ITV 4"));
+        }
+        finally
+        {
+            Directory.Delete(root, true);
+        }
     }
 }

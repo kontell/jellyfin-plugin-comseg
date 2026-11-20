@@ -54,6 +54,11 @@ internal static class AudioCommands
     /// <returns>0.</returns>
     public static int Simulate(string fingerprint, IEnumerable<string> stored, string? analysesDir, int poll, double? duration, string @out, string? final, double? finalAt, int minBreak)
     {
+        if (poll <= 0)
+        {
+            throw new ArgumentException("--poll must be at least 1");
+        }
+
         var items = Fingerprint.Load(fingerprint);
         var store = stored.Select(spec =>
         {
@@ -63,9 +68,10 @@ internal static class AudioCommands
                 new StoredRecordingInfo(fp, "eval", null, DateTime.UtcNow, Fingerprint.TimeOf(fpItems.Length), EdlParser.Parse(File.ReadAllText(edl))),
                 fpItems);
         }).ToList();
-        // Each stored recording's coverage against the others, as the store records it when it keeps one.
-        store = store.Select(s => new StoredRecording(
-            s.Info with { Coverage = AudioTrust.Coverage(s.Items, s.Info.Breaks, store.Where(o => o != s).ToList()) },
+        // Each stored recording's coverage against those listed before it, as the store records it when
+        // it keeps one, oldest first: list the stored recordings in the order they aired.
+        store = store.Select((s, i) => new StoredRecording(
+            s.Info with { Coverage = AudioTrust.Coverage(s.Items, s.Info.Breaks, store.Take(i).ToList()) },
             s.Items)).ToList();
         var trust = AudioTrust.IsTrusted(store);
         Console.WriteLine("coverage " + string.Join(", ", store.Select(s => s.Info.Coverage?.ToString("0.00", CultureInfo.InvariantCulture) ?? "-")) + (trust ? ": trusted" : ": not trusted"));
@@ -101,7 +107,12 @@ internal static class AudioCommands
             }
         }
 
+        // As the watcher and live-sim do: a final pass that finds nothing keeps the live rows.
         IReadOnlyList<Break>? finalRows = final is null ? null : EdlParser.Parse(File.ReadAllText(final));
+        if (finalRows is { Count: 0 })
+        {
+            finalRows = shown;
+        }
         new Timeline(entries, finalRows, finalAt ?? until + 240).Save(@out);
         var adverts = listener.Evidence.Adverts;
         Console.WriteLine(string.Create(

@@ -74,10 +74,10 @@ public static class Matcher
 
         // Neighbouring alignments find the same run; keep the longest of each.
         var kept = new List<MatchRun>();
-        foreach (var run in runs.OrderBy(r => r.BStart).ThenByDescending(r => r.Length))
+        foreach (var run in runs.OrderByDescending(r => r.Length).ThenBy(r => r.BStart))
         {
             var dup = false;
-            for (var k = kept.Count - 1; k >= 0 && k >= kept.Count - 40; k--)
+            for (var k = 0; k < kept.Count; k++)
             {
                 var other = kept[k];
                 if (Math.Abs(run.Diagonal - other.Diagonal) <= 3 && run.BStart < other.BStart + other.Length && other.BStart < run.BStart + run.Length)
@@ -93,7 +93,7 @@ public static class Matcher
             }
         }
 
-        return kept;
+        return kept.OrderBy(r => r.BStart).ToList();
     }
 
     /// <summary>The runs along one alignment, a[j + d] against b[j].</summary>
