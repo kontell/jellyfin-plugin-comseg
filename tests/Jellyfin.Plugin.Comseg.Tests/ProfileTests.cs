@@ -155,6 +155,12 @@ public class ProfileTests
             File.Delete(media);
             Assert.Equal(0, records.Sweep([Path.Combine(root, "elsewhere")]));
             Assert.Equal(1, records.Sweep(roots));
+
+            // Roots inside roots: the inner one decides, so an inner folder not mounted keeps its records.
+            var inner = Path.Combine(root, "dvr", "extra", "C", "C.ts");
+            records.Save(new RecordingRecord(inner, "ITV 1", null, null, null, "timer"));
+            Assert.Equal(0, records.Sweep([Path.Combine(root, "dvr"), Path.Combine(root, "dvr", "extra")]));
+            Assert.NotNull(records.Get(inner));
             Assert.Null(records.Get(media));
             Assert.NotNull(records.Get(unmounted));
         }
