@@ -20,6 +20,9 @@ public static class Program
         comseg-eval live-sim --analyses DIR --out FILE [--poll SECONDS] [--confirm N] [--min-break SECONDS]
                              [--duration SECONDS] [--final EDL] [--final-at SECONDS]
         comseg-eval score    --reference FILE --timeline FILE [--lags 30,120,600,1800] [--json]
+        comseg-eval audio-match --a A.fp (--b B.fp | --self)
+        comseg-eval audio-sim --fp FILE.fp --out FILE [--store FP:EDL]... [--analyses DIR] [--poll SECONDS]
+                             [--duration SECONDS] [--final EDL] [--final-at SECONDS] [--min-break SECONDS]
 
         final     runs the plugin's full pass over a file (a recording, a scaled copy, or a kept
                   per-frame .csv) and writes DIR/final.edl.
@@ -27,6 +30,11 @@ public static class Program
                   tab, EDL file) through the plugin's live decision and writes the timeline of rows.
         score     compares a timeline with a reference; lower is better, exit code 2 when a row
                   reaches into programme the reference marks as free of breaks.
+        audio-match  the audio two raw Chromaprint fingerprints share (or one shares with its own
+                  earlier part): start in A, start in B, length, bit error.
+        audio-sim  replays a recording's fingerprint as it grew through the audio evidence and the
+                  shadow decision, against stored recordings and, given, a live Comskip's analyses;
+                  writes the timeline of rows for score.
         """;
 
     /// <summary>Runs a command.</summary>
@@ -48,6 +56,17 @@ public static class Program
                 "final" => await FinalAsync(options).ConfigureAwait(false),
                 "live-sim" => LiveSimulation(options),
                 "score" => Score(options),
+                "audio-match" => AudioCommands.Match(options.Required("a"), options.One("b"), options.Flag("self")),
+                "audio-sim" => AudioCommands.Simulate(
+                    options.Required("fp"),
+                    options.All("store"),
+                    options.One("analyses"),
+                    options.Int("poll") ?? 15,
+                    options.Number("duration"),
+                    options.Required("out"),
+                    options.One("final"),
+                    options.Number("final-at"),
+                    options.Int("min-break") ?? 20),
                 _ => throw new ArgumentException("unknown command: " + args[0]),
             };
         }
