@@ -5,9 +5,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
-using System.Net;
 using System.Net.Http;
-using System.Net.Sockets;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Channels;
@@ -45,8 +43,6 @@ public sealed class CatchupQueue : BackgroundService
     /// <summary>The longest window a job may ask for.</summary>
     public static readonly TimeSpan MaxLength = TimeSpan.FromHours(12);
 
-    private const int MaxImageBytes = 10 << 20;
-
     private static readonly TimeSpan BusyPoll = TimeSpan.FromSeconds(60);
     private static readonly TimeSpan BusyCheckWhileDownloading = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan KeepEnded = TimeSpan.FromDays(1);
@@ -61,22 +57,8 @@ public sealed class CatchupQueue : BackgroundService
     /// </summary>
     private static readonly string ReadTimeoutMicroseconds = ((long)TimeSpan.FromSeconds(60).TotalMicroseconds).ToString(CultureInfo.InvariantCulture);
 
-    /// <summary>
-    /// Fetches the client's programme image. The URL comes from a client, so it
-    /// may only reach public addresses, checked when each connection is made
-    /// (redirects included), and never through a proxy that would hide the address.
-    /// </summary>
-    private static readonly HttpClient Images = new(new SocketsHttpHandler
-    {
-        UseProxy = false,
-        AllowAutoRedirect = true,
-        MaxAutomaticRedirections = 3,
-        ConnectTimeout = TimeSpan.FromSeconds(10),
-        ConnectCallback = ConnectToPublicAddressAsync,
-    })
-    {
-        Timeout = TimeSpan.FromSeconds(30),
-    };
+    /// <summary>The client's programme image comes from a URL the client sent, so only public addresses are fetched from.</summary>
+    private static readonly ImageFetcher Images = ImageFetcher.PublicOnly();
 
     private readonly ILiveTvManager _liveTv;
     private readonly ISessionManager _sessions;
@@ -526,11 +508,11 @@ public sealed class CatchupQueue : BackgroundService
         };
 
         process.Start();
-        process.BeginErrorReadLine();
-        process.BeginOutputReadLine();
         var saved = false;
         try
         {
+            process.BeginErrorReadLine();
+            process.BeginOutputReadLine();
             var nextCheck = DateTime.UtcNow + BusyCheckWhileDownloading;
             while (!process.HasExited)
             {
@@ -576,62 +558,63 @@ public sealed class CatchupQueue : BackgroundService
         }
     }
 
-    /// <summary>Kills a process that is still running and waits, briefly, for it to go.</summary>
-    private static async Task StopAsync(Process process)
+    /// <summary>
+    /// Kills ffmpeg if it is still running and returns once it has exited. It
+    /// does not give up: the queue has one worker, so while this waits the next
+    /// job cannot start and take the IPTV connection that ffmpeg may still hold.
+    /// A killed process that lingers is stuck in the kernel, usually on I/O, and
+    /// goes when that returns. Server shutdown does not wait for it.
+    /// </summary>
+    private async Task StopAsync(Process process)
     {
-        try
+        for (var waited = 0; ; waited += 10)
         {
-            if (!process.HasExited)
+            try
             {
-                process.Kill();
+                if (process.HasExited)
+                {
+                    return;
+                }
+
+                process.Kill(entireProcessTree: true);
+            }
+            catch (InvalidOperationException)
+            {
+                // It exited between the check and the kill.
+                return;
+            }
+            catch (System.ComponentModel.Win32Exception ex)
+            {
+                _logger.LogWarning("Comseg: could not kill ffmpeg: {Problem}", ex.Message);
             }
 
             using var wait = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-            await process.WaitForExitAsync(wait.Token).ConfigureAwait(false);
-        }
-        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception or OperationCanceledException)
-        {
-            // It exited meanwhile, or would not go in time; the file is cleared up either way.
+            try
+            {
+                await process.WaitForExitAsync(wait.Token).ConfigureAwait(false);
+                return;
+            }
+            catch (OperationCanceledException)
+            {
+                _logger.LogWarning("Comseg: ffmpeg has not exited {Seconds} s after being killed; the next catchup download waits for it", waited + 10);
+            }
         }
     }
 
     /// <summary>The poster: the programme's image when it can be fetched from a public address, otherwise a frame from the recording.</summary>
     private async Task<string?> WritePosterAsync(string folder, string video, CatchupRequest request, int seconds, CancellationToken cancellationToken)
     {
-        if (Uri.TryCreate(request.ImageUrl, UriKind.Absolute, out var image) && (image.Scheme == Uri.UriSchemeHttp || image.Scheme == Uri.UriSchemeHttps))
+        if (Uri.TryCreate(request.ImageUrl, UriKind.Absolute, out var image))
         {
-            try
+            var (fetched, problem) = await Images.FetchAsync(image, cancellationToken).ConfigureAwait(false);
+            if (fetched is not null)
             {
-                using var response = await Images.GetAsync(image, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
-                var type = response.Content.Headers.ContentType?.MediaType ?? string.Empty;
-                var extension = type switch
-                {
-                    "image/jpeg" => ".jpg",
-                    "image/png" => ".png",
-                    "image/webp" => ".webp",
-                    _ => null,
-                };
-                if (response.IsSuccessStatusCode && extension is not null && response.Content.Headers.ContentLength is null or <= MaxImageBytes)
-                {
-                    var bytes = await ReadAtMostAsync(response.Content, MaxImageBytes, cancellationToken).ConfigureAwait(false);
-                    if (bytes is { Length: > 0 })
-                    {
-                        var path = Path.Combine(folder, "poster" + extension);
-                        await File.WriteAllBytesAsync(path, bytes, cancellationToken).ConfigureAwait(false);
-                        return path;
-                    }
-                }
+                var path = Path.Combine(folder, "poster" + fetched.Extension);
+                await File.WriteAllBytesAsync(path, fetched.Bytes, cancellationToken).ConfigureAwait(false);
+                return path;
+            }
 
-                _logger.LogInformation("Comseg: the image for {Title} was not usable ({Status}, {Type}); using a frame", request.Title, (int)response.StatusCode, type);
-            }
-            catch (Exception ex) when (ex is HttpRequestException or IOException)
-            {
-                _logger.LogInformation("Comseg: the image for {Title} could not be fetched ({Problem}); using a frame", request.Title, ex.Message);
-            }
-            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-            {
-                _logger.LogInformation("Comseg: the image for {Title} timed out; using a frame", request.Title);
-            }
+            _logger.LogInformation("Comseg: the image for {Title} was not usable ({Problem}); using a frame", request.Title, problem);
         }
 
         var poster = Path.Combine(folder, "poster.jpg");
@@ -691,48 +674,6 @@ public sealed class CatchupQueue : BackgroundService
         }
 
         return null;
-    }
-
-    /// <summary>The body, or null when it is longer than <paramref name="limit"/>; read no further than that.</summary>
-    private static async Task<byte[]?> ReadAtMostAsync(HttpContent content, int limit, CancellationToken cancellationToken)
-    {
-        var stream = await content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
-        await using (stream.ConfigureAwait(false))
-        {
-            using var body = new MemoryStream();
-            var chunk = new byte[81920];
-            int read;
-            while ((read = await stream.ReadAsync(chunk, cancellationToken).ConfigureAwait(false)) > 0)
-            {
-                if (body.Length + read > limit)
-                {
-                    return null;
-                }
-
-                body.Write(chunk, 0, read);
-            }
-
-            return body.ToArray();
-        }
-    }
-
-    /// <summary>Connects the image client to a public address of the host, and to nothing else.</summary>
-    private static async ValueTask<Stream> ConnectToPublicAddressAsync(SocketsHttpConnectionContext context, CancellationToken cancellationToken)
-    {
-        var addresses = await Dns.GetHostAddressesAsync(context.DnsEndPoint.Host, cancellationToken).ConfigureAwait(false);
-        var address = addresses.FirstOrDefault(PublicAddress.IsPublic)
-            ?? throw new HttpRequestException(context.DnsEndPoint.Host + " is not a public address");
-        var socket = new Socket(address.AddressFamily, SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
-        try
-        {
-            await socket.ConnectAsync(new IPEndPoint(address, context.DnsEndPoint.Port), cancellationToken).ConfigureAwait(false);
-            return new NetworkStream(socket, ownsSocket: true);
-        }
-        catch
-        {
-            socket.Dispose();
-            throw;
-        }
     }
 
     /// <summary>Removes a programme folder this job made when nothing was saved in it.</summary>

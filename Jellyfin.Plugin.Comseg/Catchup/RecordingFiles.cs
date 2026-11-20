@@ -1,6 +1,7 @@
 using System;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Text;
 using System.Xml;
 using System.Xml.Linq;
@@ -19,9 +20,10 @@ public static class RecordingFiles
 {
     /// <summary>
     /// The programme's folder name, or null when the title cleans up to
-    /// something that is not one folder inside the recording folder: nothing,
-    /// only dots ("." and ".." would mean the recording folder or the one above
-    /// it, and Windows drops trailing dots), or a path.
+    /// something that is not one folder inside the recording folder: a path,
+    /// or nothing but dots and spaces. "." and ".." would mean the recording
+    /// folder or the one above it, and Windows drops trailing dots and spaces,
+    /// so ". . ." would become the recording folder there.
     /// </summary>
     /// <param name="title">The programme's title.</param>
     /// <param name="validName">The server's file-name cleaner (IFileSystem.GetValidFilename).</param>
@@ -29,7 +31,7 @@ public static class RecordingFiles
     public static string? FolderName(string title, Func<string, string> validName)
     {
         var name = validName(title).Trim();
-        return name.Trim('.').Trim().Length == 0 || name.IndexOfAny(['/', '\\']) >= 0 ? null : name;
+        return name.All(c => c == '.' || char.IsWhiteSpace(c)) || name.IndexOfAny(['/', '\\']) >= 0 ? null : name;
     }
 
     /// <summary>The folder and the file (without extension) for a programme.</summary>

@@ -151,7 +151,7 @@ public class CatchupTests
     public void ATitleThatIsNotOneFolderIsRefused()
     {
         static string Valid(string name) => name.Replace("?", string.Empty, StringComparison.Ordinal);
-        foreach (var title in new[] { "..", ".", "...", "???", " ? ", "a/b", @"a\b" })
+        foreach (var title in new[] { "..", ".", "...", ". . .", " .. . ", "???", " ? ", "a/b", @"a\b" })
         {
             Assert.Null(RecordingFiles.FolderName(title, Valid));
         }
@@ -183,6 +183,20 @@ public class CatchupTests
     [InlineData("fd00::1", false)]
     [InlineData("::ffff:192.168.1.1", false)]
     [InlineData("64:ff9b::a00:1", false)]
+    [InlineData("64:ff9b:1::1", false)]
+    [InlineData("192.0.2.1", false)]
+    [InlineData("198.51.100.1", false)]
+    [InlineData("203.0.113.1", false)]
+    [InlineData("192.88.99.1", false)]
+    [InlineData("240.0.0.1", false)]
+    [InlineData("100::1", false)]
+    [InlineData("2001::1", false)]
+    [InlineData("2001:db8::1", false)]
+    [InlineData("3fff::1", false)]
+    [InlineData("5f00::1", false)]
+    [InlineData("2002:c0a8:0101::1", false)]
+    [InlineData("2002:0808:0808::1", true)]
+    [InlineData("2606:4700::1111", true)]
     public void OnlyPublicAddressesMayBeFetched(string address, bool expected)
     {
         Assert.Equal(expected, PublicAddress.IsPublic(IPAddress.Parse(address)));
