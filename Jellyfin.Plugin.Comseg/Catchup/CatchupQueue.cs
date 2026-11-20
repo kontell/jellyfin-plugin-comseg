@@ -315,14 +315,15 @@ public sealed class CatchupQueue : BackgroundService
 
         job.Path = target;
         job.Percent = 100;
+
+        // As soon as the file is there: the poster and nfo can still fail, and the
+        // full pass, now or later, goes by the channel.
+        _records.Save(new RecordingRecord(target, entry.Name, null, request.Title, request.StartUtc, "catchup"));
         job.Set(CatchupState.Finishing);
         var poster = await WritePosterAsync(folder, target, request, length, cancellationToken).ConfigureAwait(false);
         await File.WriteAllBytesAsync(Path.Combine(folder, "movie.nfo"), RecordingFiles.MovieNfo(request.Title!, request.Plot, request.StartUtc, poster), cancellationToken).ConfigureAwait(false);
         await File.WriteAllBytesAsync(fileBase + ".nfo", RecordingFiles.FileNfo(request.Title!, request.Plot, request.StartUtc), cancellationToken).ConfigureAwait(false);
         _logger.LogInformation("Comseg: saved {Title} from the archive as {Path}", request.Title, target);
-
-        // The channel profile of the full pass, and of any later one, goes by this.
-        _records.Save(new RecordingRecord(target, entry.Name, null, request.Title, request.StartUtc, "catchup"));
 
         var item = await WaitForItemAsync(target, cancellationToken).ConfigureAwait(false);
         if (item is null)

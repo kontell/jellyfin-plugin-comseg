@@ -68,6 +68,7 @@ public sealed class RecordingWatcher : BackgroundService
     private readonly DetectionRegistry _registry;
     private readonly RecordingRecords _records;
     private readonly ProfileSelector _profiles;
+    private readonly RecordingPaths _paths;
     private readonly ILogger<RecordingWatcher> _logger;
     private readonly ConcurrentDictionary<string, LiveJob> _jobs = new(StringComparer.Ordinal);
     private readonly SemaphoreSlim _finalizations = new(1, 1);
@@ -92,6 +93,7 @@ public sealed class RecordingWatcher : BackgroundService
     /// <param name="registry">The detection registry.</param>
     /// <param name="records">The recording records.</param>
     /// <param name="profiles">The channel profiles.</param>
+    /// <param name="paths">The recording paths, for the roots the record sweep checks.</param>
     /// <param name="logger">The logger.</param>
     public RecordingWatcher(
         ILiveTvManager liveTv,
@@ -107,6 +109,7 @@ public sealed class RecordingWatcher : BackgroundService
         DetectionRegistry registry,
         RecordingRecords records,
         ProfileSelector profiles,
+        RecordingPaths paths,
         ILogger<RecordingWatcher> logger)
     {
         _liveTv = liveTv;
@@ -122,6 +125,7 @@ public sealed class RecordingWatcher : BackgroundService
         _registry = registry;
         _records = records;
         _profiles = profiles;
+        _paths = paths;
         _logger = logger;
     }
 
@@ -201,7 +205,7 @@ public sealed class RecordingWatcher : BackgroundService
         _library.ItemRemoved += OnItemRemoved;
         try
         {
-            var swept = _records.Sweep();
+            var swept = _records.Sweep(_paths.Roots(ComsegPlugin.Config));
             if (swept > 0)
             {
                 _logger.LogInformation("Comseg: dropped the records of {Count} recordings that are gone", swept);
@@ -412,7 +416,7 @@ public sealed class RecordingWatcher : BackgroundService
     /// </summary>
     private void RecordChannel(string path, TimerInfoDto timer)
     {
-        if (string.IsNullOrWhiteSpace(timer.ChannelName) || !_recorded.Add(path))
+        if (string.IsNullOrWhiteSpace(timer.ChannelName) || _recorded.Contains(path))
         {
             return;
         }
@@ -424,7 +428,14 @@ public sealed class RecordingWatcher : BackgroundService
             timer.Name,
             timer.StartDate == default ? null : timer.StartDate,
             "timer");
-        if (_records.SaveIfMissing(record))
+        // A write that failed is tried again at the next poll.
+        var result = _records.SaveIfMissing(record);
+        if (result != SaveResult.Failed)
+        {
+            _recorded.Add(path);
+        }
+
+        if (result == SaveResult.Saved)
         {
             _logger.LogDebug("Comseg: {Path} is recording from {Channel}", path, record.ChannelName);
         }

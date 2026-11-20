@@ -122,6 +122,7 @@ public class ComsegController : ControllerBase
     [HttpPost("Recording/{itemId}/Channel")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
     public ActionResult<RecordingResponse> SetChannel([FromRoute] Guid itemId, [FromBody] ChannelRequest request)
     {
         var item = _library.GetItemById(itemId);
@@ -130,14 +131,13 @@ public class ComsegController : ControllerBase
             return NotFound();
         }
 
-        if (string.IsNullOrWhiteSpace(request.ChannelName))
+        var old = _records.Get(item.Path);
+        var written = string.IsNullOrWhiteSpace(request.ChannelName)
+            ? _records.Delete(item.Path)
+            : _records.Save(new RecordingRecord(item.Path, request.ChannelName.Trim(), null, old?.Programme ?? item.Name, old?.StartUtc, "admin"));
+        if (!written)
         {
-            _records.Delete(item.Path);
-        }
-        else
-        {
-            var old = _records.Get(item.Path);
-            _records.Save(new RecordingRecord(item.Path, request.ChannelName.Trim(), null, old?.Programme ?? item.Name, old?.StartUtc, "admin"));
+            return Problem("the recording's record could not be written; see the server log", statusCode: StatusCodes.Status500InternalServerError);
         }
 
         return Describe(item.Id, item.Path);

@@ -141,17 +141,20 @@ public class ProfileTests
             var start = new DateTime(2026, 11, 19, 21, 0, 0, DateTimeKind.Utc);
 
             Assert.Null(records.Get(media));
-            Assert.True(records.SaveIfMissing(new RecordingRecord(media, "RTE One", "c1", "News", start, "timer")));
+            Assert.Equal(SaveResult.Saved, records.SaveIfMissing(new RecordingRecord(media, "RTE One", "c1", "News", start, "timer")));
 
             // A record already there, an admin's say, is kept.
             records.Save(new RecordingRecord(media, "RTE Two", null, "News", start, "admin"));
-            Assert.False(records.SaveIfMissing(new RecordingRecord(media, "RTE One", "c1", "News", start, "timer")));
+            Assert.Equal(SaveResult.Existed, records.SaveIfMissing(new RecordingRecord(media, "RTE One", "c1", "News", start, "timer")));
             Assert.Equal(new RecordingRecord(media, "RTE Two", null, "News", start, "admin"), records.Get(media));
             Assert.Null(records.Get(media + ".other"));
 
-            Assert.Equal(0, records.Sweep());
+            // Swept only under a recording root that is there.
+            var roots = new[] { Path.Combine(root, "dvr"), Path.Combine(root, "gone", "dvr") };
+            Assert.Equal(0, records.Sweep(roots));
             File.Delete(media);
-            Assert.Equal(1, records.Sweep());
+            Assert.Equal(0, records.Sweep([Path.Combine(root, "elsewhere")]));
+            Assert.Equal(1, records.Sweep(roots));
             Assert.Null(records.Get(media));
             Assert.NotNull(records.Get(unmounted));
         }
