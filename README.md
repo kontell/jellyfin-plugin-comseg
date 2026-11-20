@@ -26,6 +26,7 @@ Dashboard → Plugins → Comseg.
 | Analysis height | 0 (as recorded) | 720 or 480 has Comskip analyse a copy the GPU scales down through VA-API, made as the recording is written and used again for the final pass. It costs a fraction of a core, where decoding a UHD recording costs Comskip several. An HDR recording's copy is tone mapped to SDR as well, as Jellyfin does on AMD: read as SDR, an HDR picture is too flat for Comskip to find the channel logo. Recordings that are neither taller than this nor HDR are analysed as they are, and so is a recording whose copy fails. |
 | GPU device | `/dev/dri/renderD128` | The VA-API render device that makes the copy. The user Jellyfin runs as needs access to it, as it does for hardware transcoding. Tone mapping an HDR copy also needs a Vulkan driver for it (Mesa's RADV on AMD), as Jellyfin's own tone mapping does. |
 | Extra recording folders | none | Folders outside Jellyfin's own recording paths whose videos count as recordings, separated by semicolons. |
+| Audio evidence, in shadow | on | Keeps each finished recording's audio fingerprint per channel and, while a recording is written, works out the rows the audio says it would publish, in the log and the status only; see [Audio evidence](#audio-evidence-shadow). |
 | Save programmes from the IPTV archive | on | Lets clients save finished programmes from the catchup archive; see [Catchup](#catchup). |
 | Seconds asked for before a programme starts | 10 | The archive begins at the first segment after the time asked for, up to a segment late. |
 | Hours a download waits for the IPTV connection | 12 | |
@@ -44,12 +45,23 @@ A finished Jellyfin recording does not say which channel it came from, so the pl
 | Comskip ini keys | `key=value` pairs separated by semicolons, laid over the base ini for these channels. The run-mode keys the plugin sets are applied after them and win; *Check Comskip* lists any key a profile sets that is left out for that reason. |
 | Analysis height | Overrides the setting above for these channels; empty uses it. |
 | Detect while recording | Off: these recordings get only the full pass, once they finish. |
+| Audio evidence | Off: these channels' audio is neither kept nor listened to. |
 | Keep Comskip's per-frame data | After each full pass, keeps Comskip's frame data (`.csv`), its logo file, the ini and the breaks in `comseg/frames` under Jellyfin's data directory, one folder per recording: about 16 MB an hour. Comskip replays the `.csv` without decoding, which makes trying settings on a recording cheap. |
 
 Keys that have mattered:
 
 - **A logo at the bottom of the picture**, as on RTÉ News: the built-in `ticker_tape_percentage=15` hides it, Comskip settles on something else or on no logo, and breaks are missed. `ticker_tape_percentage=0` for those channels.
 - **A provider watermark in a bottom corner**, as on some IPTV sports feeds: keep the built-in mask, or Comskip takes the watermark, which stays on through the adverts, for the logo.
+
+## Audio evidence (shadow)
+
+Comskip finds breaks from the picture. While a break is on air it cannot tell where it ends, so a row's end runs on to the end of the file until the next analysis, a minute later, puts it back, and a viewer close to live skips some of the programme. Adverts, promos and sponsor clips repeat, though, and the audio says where they are the moment they air.
+
+With *Audio evidence, in shadow* on (the default), the plugin keeps the audio fingerprint of each finished recording of a channel, taken with Jellyfin's own ffmpeg (Chromaprint), together with its final breaks: the newest 20 recordings per channel, none older than 45 days, about 120 KB an hour. While a recording is written, every poll fingerprints its newest audio and looks for it in those recordings and in the recording's own earlier part. Audio heard inside a stored break is advert audio, audio heard outside one is programme audio, and audio heard at a break's edge, such as a sponsor clip, says where this break starts or ends.
+
+From that and Comskip's analyses the plugin works out the rows it would publish: a break opens on two adverts heard within a minute, or a known break start followed by an advert; a row ends where the audio last heard adverts, or at an edge the audio implies, rather than at the end of the file; programme audio cuts a row. On a channel whose breaks nearly always carry audio heard before, a break Comskip reports with none is left for the final pass. Those rows go to the log and the status on the settings page only; what is published does not change. A profile can turn the audio off for its channels. Recordings whose channel the plugin does not know are not listened to.
+
+The status lists, for each recording in progress, how many kept recordings it is matched against and the rows it would publish.
 
 ## Catchup
 

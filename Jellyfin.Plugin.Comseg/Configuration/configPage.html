@@ -88,6 +88,13 @@
                         <input is="emby-input" type="text" id="txtExtraPaths" label="Extra recording folders" />
                         <div class="fieldDescription">Separate several with semicolons. Jellyfin's own recording folders are always included.</div>
                     </div>
+                    <div class="checkboxContainer checkboxContainer-withDescription">
+                        <label class="emby-checkbox-label">
+                            <input is="emby-checkbox" type="checkbox" id="chkAudio" />
+                            <span>Audio evidence, in shadow</span>
+                        </label>
+                        <div class="fieldDescription checkboxDescription">Keep each finished recording's audio fingerprint per channel (about 120 KB an hour, the newest 20 recordings), and while a recording is written, work out from it the breaks it would publish. Those go to the log and the status below only; nothing published changes. Needs the channel noted from the recording's timer.</div>
+                    </div>
                     <h3>Channel profiles</h3>
                     <div class="fieldDescription">Settings for the recordings of particular channels. A recording's channel is noted from its timer when it starts recording; the first profile that lists it applies, and recordings no profile lists run with the settings above.</div>
                     <br />
@@ -143,6 +150,7 @@
                     document.querySelector('#chkLive').checked = !!config.EnableLiveDetection;
                     document.querySelector('#chkCompleted').checked = !!config.EnableCompletedDetection;
                     document.querySelector('#chkCatchup').checked = !!config.EnableCatchup;
+                    document.querySelector('#chkAudio').checked = config.EnableAudioEvidence !== false;
                     setValue('#txtCatchupPad', config.CatchupPadSeconds);
                     setValue('#txtCatchupWait', config.CatchupMaxWaitHours);
                     setValue('#txtInterval', config.LiveMasterIntervalSeconds);
@@ -177,7 +185,8 @@
                         IniKeys: el.querySelector('.profKeys').value.trim(),
                         AnalysisHeight: isNaN(height) ? -1 : height,
                         LiveDetection: el.querySelector('.profLive').checked,
-                        KeepFrames: el.querySelector('.profKeep').checked
+                        KeepFrames: el.querySelector('.profKeep').checked,
+                        AudioEvidence: el.querySelector('.profAudio').checked
                     };
                 });
             }
@@ -199,6 +208,8 @@
                         + '<div class="inputContainer"><input is="emby-input" type="number" class="profHeight" pattern="[0-9]*" min="0" max="1080" label="Analysis height (empty uses the setting above)" value="' + (p.AnalysisHeight >= 0 ? p.AnalysisHeight : '') + '" /></div>'
                         + '<div class="checkboxContainer checkboxContainer-withDescription"><label class="emby-checkbox-label"><input is="emby-checkbox" type="checkbox" class="profLive"' + (p.LiveDetection !== false ? ' checked' : '') + ' /><span>Detect while recording</span></label>'
                         + '<div class="fieldDescription checkboxDescription">Off: these recordings get only the full pass, once they finish.</div></div>'
+                        + '<div class="checkboxContainer checkboxContainer-withDescription"><label class="emby-checkbox-label"><input is="emby-checkbox" type="checkbox" class="profAudio"' + (p.AudioEvidence !== false ? ' checked' : '') + ' /><span>Audio evidence</span></label>'
+                        + '<div class="fieldDescription checkboxDescription">Off: these channels\' audio is neither kept nor listened to.</div></div>'
                         + '<div class="checkboxContainer checkboxContainer-withDescription"><label class="emby-checkbox-label"><input is="emby-checkbox" type="checkbox" class="profKeep"' + (p.KeepFrames ? ' checked' : '') + ' /><span>Keep Comskip\'s per-frame data</span></label>'
                         + '<div class="fieldDescription checkboxDescription">After each full pass, keep Comskip\'s .csv, logo file, ini and breaks in the comseg/frames folder under Jellyfin\'s data directory, for tuning: about 16 MB an hour of recording.</div></div>'
                         + '<div>'
@@ -243,6 +254,7 @@
                             + (j.Finalizing ? ', finishing' : '')
                             + (j.Finished ? ', finished; keeping the breaks in place until Jellyfin has refreshed the closed file' : '')
                             + (j.LastError ? ', ' + escapeHtml(j.LastError) : '')
+                            + (j.Shadow ? '<br />audio, in shadow: ' + escapeHtml(j.Shadow) : '')
                             + '</li>';
                     });
                     box.innerHTML = '<ul>' + rows.join('') + '</ul>';
@@ -255,7 +267,7 @@
             document.querySelector('#btnRefresh').addEventListener('click', status);
             document.querySelector('#btnAddProfile').addEventListener('click', function () {
                 var list = readProfiles();
-                list.push({ Name: '', Channels: '', IniKeys: '', AnalysisHeight: -1, LiveDetection: true, KeepFrames: false });
+                list.push({ Name: '', Channels: '', IniKeys: '', AnalysisHeight: -1, LiveDetection: true, KeepFrames: false, AudioEvidence: true });
                 renderProfiles(list);
             });
 
@@ -279,6 +291,7 @@
                     config.EnableLiveDetection = document.querySelector('#chkLive').checked;
                     config.EnableCompletedDetection = document.querySelector('#chkCompleted').checked;
                     config.EnableCatchup = document.querySelector('#chkCatchup').checked;
+                    config.EnableAudioEvidence = document.querySelector('#chkAudio').checked;
                     config.CatchupPadSeconds = num('#txtCatchupPad', 10);
                     config.CatchupMaxWaitHours = num('#txtCatchupWait', 12);
                     config.LiveMasterIntervalSeconds = num('#txtInterval', 60);

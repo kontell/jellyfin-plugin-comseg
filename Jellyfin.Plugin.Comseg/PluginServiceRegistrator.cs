@@ -1,3 +1,4 @@
+using Jellyfin.Plugin.Comseg.Audio;
 using Jellyfin.Plugin.Comseg.Catchup;
 using Jellyfin.Plugin.Comseg.Comskip;
 using Jellyfin.Plugin.Comseg.Live;
@@ -30,6 +31,9 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddSingleton<Workspace>();
         serviceCollection.AddSingleton<RecordingRecords>();
         serviceCollection.AddSingleton<ProfileSelector>();
+        serviceCollection.AddSingleton<Fingerprinter>();
+        serviceCollection.AddSingleton<AudioStore>();
+        serviceCollection.AddSingleton<AudioLearner>();
         serviceCollection.AddSingleton<ScaledCopy>();
         serviceCollection.AddSingleton<CompletedPass>();
         serviceCollection.AddSingleton<RecordingPaths>();

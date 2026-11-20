@@ -68,6 +68,9 @@ public class ComsegController : ControllerBase
             Channel = j.Settings.Record?.ChannelName,
             Profile = j.Settings.ProfileName,
             LiveDetection = j.AnalysesLive,
+            Shadow = j.Audio is { } audio
+                ? string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0} kept recordings{1}; heard {2:0} s; would publish {3}", audio.Listener.StoredCount, audio.Trusted ? ", trusted" : string.Empty, audio.Listener.Heard, Audio.AudioShadow.Describe(audio.Rows))
+                : null,
             Finalizing = j.Finalizing,
             Finished = j.Finished,
             LastError = Problems(j),
@@ -187,7 +190,7 @@ public class ComsegController : ControllerBase
     /// <summary>A job's problems for the status page: storing the breaks first, then Comskip, then the scaled copy.</summary>
     private static string? Problems(LiveJob job)
     {
-        var problems = new[] { job.StoreError, job.LastError, job.Copy.Problem }.Where(p => p is not null).ToList();
+        var problems = new[] { job.StoreError, job.LastError, job.Copy.Problem, job.AudioError }.Where(p => p is not null).ToList();
         return problems.Count == 0 ? null : string.Join("; ", problems);
     }
 
@@ -251,6 +254,9 @@ public class ComsegController : ControllerBase
 
         /// <summary>Gets or sets a value indicating whether a live Comskip analyses the recording; its profile can turn that off.</summary>
         public bool LiveDetection { get; set; }
+
+        /// <summary>Gets or sets what the audio decision, run in shadow, would publish, or null when the recording is not listened to.</summary>
+        public string? Shadow { get; set; }
     }
 
     /// <summary>A recording's channel and settings.</summary>

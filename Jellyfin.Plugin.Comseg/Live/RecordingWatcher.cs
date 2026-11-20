@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Jellyfin.Plugin.Comseg.Audio;
 using Jellyfin.Plugin.Comseg.Comskip;
 using Jellyfin.Plugin.Comseg.Configuration;
 using Jellyfin.Plugin.Comseg.Edl;
@@ -69,6 +70,8 @@ public sealed class RecordingWatcher : BackgroundService
     private readonly RecordingRecords _records;
     private readonly ProfileSelector _profiles;
     private readonly RecordingPaths _paths;
+    private readonly Fingerprinter _fingerprinter;
+    private readonly AudioStore _audio;
     private readonly ILogger<RecordingWatcher> _logger;
     private readonly ConcurrentDictionary<string, LiveJob> _jobs = new(StringComparer.Ordinal);
     private readonly SemaphoreSlim _finalizations = new(1, 1);
@@ -94,6 +97,8 @@ public sealed class RecordingWatcher : BackgroundService
     /// <param name="records">The recording records.</param>
     /// <param name="profiles">The channel profiles.</param>
     /// <param name="paths">The recording paths, for the roots the record sweep checks.</param>
+    /// <param name="fingerprinter">The fingerprinter.</param>
+    /// <param name="audio">The audio store.</param>
     /// <param name="logger">The logger.</param>
     public RecordingWatcher(
         ILiveTvManager liveTv,
@@ -110,6 +115,8 @@ public sealed class RecordingWatcher : BackgroundService
         RecordingRecords records,
         ProfileSelector profiles,
         RecordingPaths paths,
+        Fingerprinter fingerprinter,
+        AudioStore audio,
         ILogger<RecordingWatcher> logger)
     {
         _liveTv = liveTv;
@@ -126,6 +133,8 @@ public sealed class RecordingWatcher : BackgroundService
         _records = records;
         _profiles = profiles;
         _paths = paths;
+        _fingerprinter = fingerprinter;
+        _audio = audio;
         _logger = logger;
     }
 
@@ -299,6 +308,20 @@ public sealed class RecordingWatcher : BackgroundService
                     var workDir = _workspace.JobDir(run, "live", path);
                     var copy = new LiveCopy(_copies, _logger, path, Path.Combine(workDir, "copy.ts"), settings.LiveDetection ? ScaledCopy.Height(run) : 0);
                     job = new LiveJob(path, workDir, new LiveBreakTracker(run.ConfirmPasses, run.MinBreakSeconds), copy, settings);
+                    if (settings.AudioEvidence)
+                    {
+                        var stored = _audio.Load(settings.Record!.ChannelName, except: path);
+                        job.Audio = new AudioShadow(stored);
+                        if (job.Audio.Trusted)
+                        {
+                            _logger.LogInformation("Comseg: listening to {Path} in shadow, against {Count} kept recordings of {Channel}, whose audio is trusted", path, stored.Count, settings.Record.ChannelName);
+                        }
+                        else
+                        {
+                            _logger.LogInformation("Comseg: listening to {Path} in shadow, against {Count} kept recordings of {Channel}", path, stored.Count, settings.Record.ChannelName);
+                        }
+                    }
+
                     _jobs[path] = job;
                     if (settings.LiveDetection)
                     {
@@ -533,6 +556,8 @@ public sealed class RecordingWatcher : BackgroundService
             ReadAnalysis(job, process);
         }
 
+        await ListenAsync(job, cancellationToken).ConfigureAwait(false);
+
         // Reconcile every poll, not only when an analysis changed something: rows
         // can go in ways the provider does not hear of.
         await ReconcileAsync(job, null).ConfigureAwait(false);
@@ -613,6 +638,53 @@ public sealed class RecordingWatcher : BackgroundService
             job.Item?.Name ?? Path.GetFileName(job.Path),
             breaks.Count == 0 ? "no breaks" : string.Join(", ", breaks.Select(b => string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0:0}-{1:0}", b.Start, b.End))));
         job.Tracker.Observe(breaks);
+        job.Audio?.Analysed(breaks);
+    }
+
+    /// <summary>
+    /// Fingerprints the newest audio of the recording, from 5 s before what was
+    /// heard last, and runs the audio decision over it in shadow: what it would
+    /// publish goes to the log when it changes, beside what is published. A
+    /// problem here is noted for the status page and never touches the rows.
+    /// </summary>
+    private async Task ListenAsync(LiveJob job, CancellationToken cancellationToken)
+    {
+        if (job.Audio is not { } audio)
+        {
+            return;
+        }
+
+        try
+        {
+            if (!await _fingerprinter.AvailableAsync(cancellationToken).ConfigureAwait(false))
+            {
+                job.Audio = null;
+                return;
+            }
+
+            var from = Math.Max(0, audio.HeardItems - Fingerprint.ItemAt(5));
+            var items = await _fingerprinter.ExtractAsync(job.Path, Fingerprint.TimeOf(from), null, cancellationToken).ConfigureAwait(false);
+            if (items is null)
+            {
+                job.AudioError = "fingerprinting the recording failed";
+                return;
+            }
+
+            job.AudioError = null;
+            if (items.Length > 0 && audio.Update(from, items, job.Settings.Config.MinBreakSeconds))
+            {
+                _logger.LogInformation(
+                    "Comseg: shadow of {Name}: would publish {Shadow}; published {Published}",
+                    job.Item?.Name ?? Path.GetFileName(job.Path),
+                    AudioShadow.Describe(audio.Rows),
+                    job.Tracker.Confirmed.Count == 0 ? "no breaks" : string.Join(", ", job.Tracker.Confirmed.Select(b => string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0:0}-{1:0}", b.Start, b.End))));
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            job.AudioError = "listening failed: " + ex.Message;
+            _logger.LogWarning(ex, "Comseg: listening to {Path} failed", job.Path);
+        }
     }
 
     /// <summary>

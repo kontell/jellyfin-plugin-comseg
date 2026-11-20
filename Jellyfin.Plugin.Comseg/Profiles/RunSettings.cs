@@ -19,6 +19,9 @@ public sealed record RunSettings(
     /// <summary>Gets a value indicating whether the recording is analysed while it records: the plugin's setting, unless the profile turns it off.</summary>
     public bool LiveDetection => Config.EnableLiveDetection && (Profile?.LiveDetection ?? true);
 
+    /// <summary>Gets a value indicating whether the recording's audio is kept and listened to: on when the plugin's setting is, unless the profile turns it off, and only for a recording whose channel is known.</summary>
+    public bool AudioEvidence => Config.EnableAudioEvidence && (Profile?.AudioEvidence ?? true) && Record is not null;
+
     /// <summary>Gets a value indicating whether Comskip's per-frame data is kept after a full pass.</summary>
     public bool KeepFrames => Profile?.KeepFrames ?? false;
 
