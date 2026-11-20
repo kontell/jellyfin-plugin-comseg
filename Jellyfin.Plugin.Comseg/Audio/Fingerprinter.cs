@@ -45,6 +45,9 @@ public sealed class Fingerprinter
     /// <returns>The fingerprinter.</returns>
     public static Fingerprinter WithFfmpeg(string ffmpeg, ILogger logger) => new(() => ffmpeg, logger);
 
+    /// <summary>Gets a value indicating whether ffmpeg has answered that it has no chromaprint muxer; a check that timed out does not count.</summary>
+    public bool MuxerMissing => _available == false;
+
     /// <summary>Whether the server's ffmpeg has the chromaprint muxer; asked once, and said in the log when not.</summary>
     /// <param name="cancellationToken">Cancellation.</param>
     /// <returns>True when it has.</returns>
