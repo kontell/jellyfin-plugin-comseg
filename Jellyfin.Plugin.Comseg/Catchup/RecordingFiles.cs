@@ -17,15 +17,32 @@ namespace Jellyfin.Plugin.Comseg.Catchup;
 /// </summary>
 public static class RecordingFiles
 {
+    /// <summary>
+    /// The programme's folder name, or null when the title cleans up to
+    /// something that is not one folder inside the recording folder: nothing,
+    /// only dots ("." and ".." would mean the recording folder or the one above
+    /// it, and Windows drops trailing dots), or a path.
+    /// </summary>
+    /// <param name="title">The programme's title.</param>
+    /// <param name="validName">The server's file-name cleaner (IFileSystem.GetValidFilename).</param>
+    /// <returns>The folder name, or null.</returns>
+    public static string? FolderName(string title, Func<string, string> validName)
+    {
+        var name = validName(title).Trim();
+        return name.Trim('.').Trim().Length == 0 || name.IndexOfAny(['/', '\\']) >= 0 ? null : name;
+    }
+
     /// <summary>The folder and the file (without extension) for a programme.</summary>
     /// <param name="root">The recording folder.</param>
     /// <param name="title">The programme's title.</param>
     /// <param name="startUtc">When the programme started.</param>
     /// <param name="validName">The server's file-name cleaner (IFileSystem.GetValidFilename).</param>
     /// <returns>The folder, and the file path without its extension.</returns>
+    /// <exception cref="ArgumentException">The title makes no folder name (see <see cref="FolderName"/>).</exception>
     public static (string Folder, string FileBase) Paths(string root, string title, DateTime startUtc, Func<string, string> validName)
     {
-        var folder = Path.Combine(root, validName(title).Trim());
+        var name = FolderName(title, validName) ?? throw new ArgumentException("the title makes no usable folder name", nameof(title));
+        var folder = Path.Combine(root, name);
         var stamp = DateTime.SpecifyKind(startUtc, DateTimeKind.Utc).ToLocalTime().ToString("yyyy_MM_dd_HH_mm_ss", CultureInfo.InvariantCulture);
         var file = validName(title + " " + stamp).Trim();
         return (folder, Path.Combine(folder, file));
