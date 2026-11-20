@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using Jellyfin.Plugin.Comseg.Comskip;
 using Jellyfin.Plugin.Comseg.Edl;
 
 namespace Jellyfin.Plugin.Comseg.Audio;
@@ -16,6 +17,7 @@ public sealed class AudioShadow
 {
     private IReadOnlyList<Break>? _latest;
     private IReadOnlyList<Break>? _previous;
+    private AnalysisStatus? _status;
 
     /// <summary>Initializes a new instance of the <see cref="AudioShadow"/> class.</summary>
     /// <param name="stored">The channel's stored recordings.</param>
@@ -37,12 +39,17 @@ public sealed class AudioShadow
     /// <summary>Gets how many items of the recording have been heard.</summary>
     public int HeardItems => Fingerprint.ItemAt(Listener.Heard);
 
+    /// <summary>Gets a value indicating whether Comskip-only breaks wait for the final pass: the channel's audio is trusted, or the latest analysis was made without the channel logo while the channel has audio history to go by.</summary>
+    public bool HoldsBackComskip => Trusted || (_status?.WithoutLogo == true && Listener.StoredCount > 0);
+
     /// <summary>Notes a new analysis from the live Comskip.</summary>
     /// <param name="breaks">Its breaks.</param>
-    public void Analysed(IReadOnlyList<Break> breaks)
+    /// <param name="status">What the Comseg build said about it, or null from a build that does not say.</param>
+    public void Analysed(IReadOnlyList<Break> breaks, AnalysisStatus? status = null)
     {
         _previous = _latest;
         _latest = breaks;
+        _status = status;
     }
 
     /// <summary>Hears the newest audio, searches it and decides again.</summary>
@@ -57,7 +64,7 @@ public sealed class AudioShadow
         // Its own breaks so far, less any still open, say what its repeats are.
         var heard = Listener.Heard;
         Listener.Search(Rows.Select(r => r.Break).Where(b => b.End < heard - 30).ToList());
-        var rows = ShadowDecision.Decide(_latest, _previous, Listener.Evidence, minBreak, Trusted);
+        var rows = ShadowDecision.Decide(_latest, _previous, Listener.Evidence, minBreak, HoldsBackComskip, Listener.Heard);
         if (rows.SequenceEqual(Rows))
         {
             return false;

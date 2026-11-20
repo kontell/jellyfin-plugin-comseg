@@ -186,7 +186,8 @@
                         AnalysisHeight: isNaN(height) ? -1 : height,
                         LiveDetection: el.querySelector('.profLive').checked,
                         KeepFrames: el.querySelector('.profKeep').checked,
-                        AudioEvidence: el.querySelector('.profAudio').checked
+                        AudioEvidence: el.querySelector('.profAudio').checked,
+                        PublishAudio: el.querySelector('.profPublish').checked
                     };
                 });
             }
@@ -210,6 +211,8 @@
                         + '<div class="fieldDescription checkboxDescription">Off: these recordings get only the full pass, once they finish.</div></div>'
                         + '<div class="checkboxContainer checkboxContainer-withDescription"><label class="emby-checkbox-label"><input is="emby-checkbox" type="checkbox" class="profAudio"' + (p.AudioEvidence !== false ? ' checked' : '') + ' /><span>Audio evidence</span></label>'
                         + '<div class="fieldDescription checkboxDescription">Off: these channels\' audio is neither kept nor listened to.</div></div>'
+                        + '<div class="checkboxContainer checkboxContainer-withDescription"><label class="emby-checkbox-label"><input is="emby-checkbox" type="checkbox" class="profPublish"' + (p.PublishAudio ? ' checked' : '') + ' /><span>Publish from audio evidence</span></label>'
+                        + '<div class="fieldDescription checkboxDescription">While these channels record, clients see the rows the audio decision gives (shown in shadow otherwise): breaks open on known adverts and sponsor clips, and end where the audio last heard adverts rather than at the end of the file. Turn it on for a channel once its shadow rows have looked right.</div></div>'
                         + '<div class="checkboxContainer checkboxContainer-withDescription"><label class="emby-checkbox-label"><input is="emby-checkbox" type="checkbox" class="profKeep"' + (p.KeepFrames ? ' checked' : '') + ' /><span>Keep Comskip\'s per-frame data</span></label>'
                         + '<div class="fieldDescription checkboxDescription">After each full pass, keep Comskip\'s .csv, logo file, ini and breaks in the comseg/frames folder under Jellyfin\'s data directory, for tuning: about 16 MB an hour of recording.</div></div>'
                         + '<div>'
@@ -267,7 +270,7 @@
             document.querySelector('#btnRefresh').addEventListener('click', status);
             document.querySelector('#btnAddProfile').addEventListener('click', function () {
                 var list = readProfiles();
-                list.push({ Name: '', Channels: '', IniKeys: '', AnalysisHeight: -1, LiveDetection: true, KeepFrames: false, AudioEvidence: true });
+                list.push({ Name: '', Channels: '', IniKeys: '', AnalysisHeight: -1, LiveDetection: true, KeepFrames: false, AudioEvidence: true, PublishAudio: false });
                 renderProfiles(list);
             });
 

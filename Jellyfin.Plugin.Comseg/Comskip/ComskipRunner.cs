@@ -233,6 +233,9 @@ public sealed class ComskipRunner
         /// <summary>Gets the periodic full-analysis output (the patched binary's &lt;base&gt;.master.edl).</summary>
         public string MasterEdlPath { get; }
 
+        /// <summary>Gets the status the Comseg build writes beside each periodic analysis (&lt;base&gt;.master.status), which older builds do not.</summary>
+        public string StatusPath => System.IO.Path.ChangeExtension(MasterEdlPath, ".status");
+
         /// <summary>Gets Comskip's own .edl, written by its final pass when the input ends.</summary>
         public string EdlPath { get; }
 

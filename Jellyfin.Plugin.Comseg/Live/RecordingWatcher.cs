@@ -428,7 +428,7 @@ public sealed class RecordingWatcher : BackgroundService
     /// </summary>
     private bool KeepsBreaksInPlace(LiveJob job)
     {
-        if (job.Item is not { } item || (job.FinalBreaks ?? job.LiveBreaks) is not { Count: > 0 })
+        if (job.Item is not { } item || (job.FinalBreaks ?? job.PublishableBreaks) is not { Count: > 0 })
         {
             return false;
         }
@@ -652,7 +652,7 @@ public sealed class RecordingWatcher : BackgroundService
             job.Item?.Name ?? Path.GetFileName(job.Path),
             breaks.Count == 0 ? "no breaks" : string.Join(", ", breaks.Select(b => string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0:0}-{1:0}", b.Start, b.End))));
         job.Tracker.Observe(breaks);
-        job.Audio?.Analysed(breaks);
+        job.Audio?.Analysed(breaks, AnalysisStatus.Read(process.StatusPath));
     }
 
     /// <summary>
@@ -698,7 +698,7 @@ public sealed class RecordingWatcher : BackgroundService
             if (items.Length > 0 && audio.Update(from, items, job.Settings.Config.MinBreakSeconds))
             {
                 _logger.LogInformation(
-                    "Comseg: shadow of {Name}: would publish {Shadow}; published {Published}",
+                    job.PublishesAudio ? "Comseg: audio decision for {Name}: publishes {Shadow}; Comskip's analyses alone gave {Published}" : "Comseg: shadow of {Name}: would publish {Shadow}; published {Published}",
                     job.Item?.Name ?? Path.GetFileName(job.Path),
                     AudioShadow.Describe(audio.Rows),
                     job.Tracker.Confirmed.Count == 0 ? "no breaks" : string.Join(", ", job.Tracker.Confirmed.Select(b => string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0:0}-{1:0}", b.Start, b.End))));
@@ -727,7 +727,7 @@ public sealed class RecordingWatcher : BackgroundService
         {
             var item = job.Item;
             var final = job.FinalBreaks;
-            var breaks = final ?? job.LiveBreaks;
+            var breaks = final ?? job.PublishableBreaks;
             if (item is null || breaks is null)
             {
                 return null;
@@ -892,7 +892,7 @@ public sealed class RecordingWatcher : BackgroundService
                 // has most likely failed (lost the channel logo, say) rather than
                 // found a programme without adverts, so the live breaks stand.
                 var kept = false;
-                if (breaks.Count == 0 && job.LiveBreaks is { Count: > 0 } live)
+                if (breaks.Count == 0 && job.PublishableBreaks is { Count: > 0 } live)
                 {
                     _logger.LogWarning("Comseg: final pass over {Path} found no breaks; keeping the {Count} live ones", job.Path, live.Count);
                     job.LastError = "the final pass found no breaks; the live ones stand";

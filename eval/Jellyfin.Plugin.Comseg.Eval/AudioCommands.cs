@@ -51,8 +51,9 @@ internal static class AudioCommands
     /// <param name="final">The final pass's EDL, or null.</param>
     /// <param name="finalAt">When the final rows take effect, or null.</param>
     /// <param name="minBreak">The shortest break published.</param>
+    /// <param name="verbose">Whether to print the evidence too.</param>
     /// <returns>0.</returns>
-    public static int Simulate(string fingerprint, IEnumerable<string> stored, string? analysesDir, int poll, double? duration, string @out, string? final, double? finalAt, int minBreak)
+    public static int Simulate(string fingerprint, IEnumerable<string> stored, string? analysesDir, int poll, double? duration, string @out, string? final, double? finalAt, int minBreak, bool verbose = false)
     {
         if (poll <= 0)
         {
@@ -94,7 +95,7 @@ internal static class AudioCommands
             var seen = analyses.Where(a => a.T <= now).ToList();
             var latest = seen.Count > 0 ? seen[^1].Breaks : null;
             var previous = seen.Count > 1 ? seen[^2].Breaks : null;
-            var rows = ShadowDecision.Decide(latest, previous, listener.Evidence, minBreak, trust).Select(r => r.Break).ToList();
+            var rows = ShadowDecision.Decide(latest, previous, listener.Evidence, minBreak, trust, now).Select(r => r.Break).ToList();
             if (!rows.SequenceEqual(shown))
             {
                 entries.Add(new Timeline.Entry(now, rows));
@@ -121,6 +122,24 @@ internal static class AudioCommands
         foreach (var row in shown)
         {
             Console.WriteLine(string.Create(CultureInfo.InvariantCulture, $"  {row.Start,8:0.0} {row.End,8:0.0}"));
+        }
+
+        if (verbose)
+        {
+            foreach (var a in adverts)
+            {
+                Console.WriteLine(string.Create(CultureInfo.InvariantCulture, $"  advert    {a.Start,8:0.0} {a.End,8:0.0}"));
+            }
+
+            foreach (var p in listener.Evidence.Programme)
+            {
+                Console.WriteLine(string.Create(CultureInfo.InvariantCulture, $"  programme {p.Start,8:0.0} {p.End,8:0.0}"));
+            }
+
+            foreach (var e in listener.Evidence.Edges)
+            {
+                Console.WriteLine(string.Create(CultureInfo.InvariantCulture, $"  {(e.IsStart ? "start" : "end"),-9} {e.At,8:0.0}"));
+            }
         }
 
         return 0;

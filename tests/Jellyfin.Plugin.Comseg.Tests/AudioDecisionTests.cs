@@ -183,4 +183,43 @@ public class AudioDecisionTests
             Directory.Delete(root, true);
         }
     }
+
+    [Fact]
+    public void TheComskipStatusSaysWhetherTheLogoWasUsed()
+    {
+        var status = Jellyfin.Plugin.Comseg.Comskip.AnalysisStatus.Parse("frames=150010\nseconds=3000.16\nlogo=disabled\nlogo_fraction=0.1854\nthreshold=1.050\nbreak=0.00 52.24 26.571\nbreak=1092.46 1375.76 18.720\n");
+        Assert.NotNull(status);
+        Assert.True(status!.WithoutLogo);
+        Assert.Equal(3000.16, status.Seconds, 2);
+        Assert.Equal((new Break(1092.46, 1375.76), 18.72), status.Breaks[1]);
+        Assert.False(Jellyfin.Plugin.Comseg.Comskip.AnalysisStatus.Parse("logo=found\n")!.WithoutLogo);
+        Assert.Null(Jellyfin.Plugin.Comseg.Comskip.AnalysisStatus.Parse("frames=1\n"));
+    }
+
+    [Fact]
+    public void AnAnalysisWithoutTheLogoWaitsWhereTheChannelHasAudioHistory()
+    {
+        var stored = new StoredRecording(new StoredRecordingInfo("/s.ts", "ITV 1", null, DateTime.UtcNow, 10, StoredBreaks), AudioMatchTests.Noise(100, 1));
+        var shadow = new AudioShadow([stored]);
+        Assert.False(shadow.HoldsBackComskip);
+        shadow.Analysed([new Break(500, 600)], Jellyfin.Plugin.Comseg.Comskip.AnalysisStatus.Parse("logo=none\n"));
+        Assert.True(shadow.HoldsBackComskip);
+
+        // Without history there is nothing better to go by.
+        var bare = new AudioShadow([]);
+        bare.Analysed([new Break(500, 600)], Jellyfin.Plugin.Comseg.Comskip.AnalysisStatus.Parse("logo=none\n"));
+        Assert.False(bare.HoldsBackComskip);
+    }
+
+    [Fact]
+    public void AClipThatClosedBreaksBeforeOpensOneThatStartsWithIt()
+    {
+        // Sponsors swap ends: the clip heard here closed the stored breaks (an end edge just after it),
+        // but nothing was open, so it opens this one.
+        var rows = ShadowDecision.Decide(null, null, Evidence([Advert(2410, 2420)], [new AudioEdge(2427, false)]), 20, heard: 2430);
+        Assert.Equal(new Break(2410, 2420), rows.Single().Break);
+
+        // Once the break is over, a row that short is not a break.
+        Assert.Empty(ShadowDecision.Decide(null, null, Evidence([Advert(2410, 2420)], [new AudioEdge(2427, false)]), 20, heard: 2600));
+    }
 }
