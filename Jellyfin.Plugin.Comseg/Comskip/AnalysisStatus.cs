@@ -34,10 +34,15 @@ public sealed record AnalysisStatus(double Seconds, string Logo, double LogoFrac
     {
         try
         {
-            return File.Exists(path) ? Parse(File.ReadAllText(path)) ?? last : null;
+            return Parse(File.ReadAllText(path)) ?? last;
+        }
+        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
+        {
+            return null;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
+            // Read straight away rather than asked about first: File.Exists says no on an access error too.
             return last;
         }
     }
