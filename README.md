@@ -46,6 +46,7 @@ A finished Jellyfin recording does not say which channel it came from, so the pl
 | Analysis height | Overrides the setting above for these channels; empty uses it. |
 | Detect while recording | Off: these recordings get only the full pass, once they finish. |
 | Audio evidence | Off: these channels' audio is neither kept nor listened to. |
+| Publish from audio evidence | Off by default. On: while these channels record, clients see the rows the audio decision gives rather than Comskip's analyses alone. Turn it on for a channel once its shadow rows have looked right; see [Audio evidence](#audio-evidence-shadow). |
 | Keep Comskip's per-frame data | After each full pass, keeps Comskip's frame data (`.csv`), its logo file, the ini and the breaks in `comseg/frames` under Jellyfin's data directory, one folder per recording: about 16 MB an hour. Comskip replays the `.csv` without decoding, which makes trying settings on a recording cheap. |
 
 Keys that have mattered:
@@ -62,6 +63,8 @@ With *Audio evidence, in shadow* on (the default), the plugin keeps the audio fi
 From that and Comskip's analyses the plugin works out the rows it would publish: a break opens on two adverts heard within a minute, or a known break start followed by an advert; a row ends where the audio last heard adverts, or at an edge the audio implies, rather than at the end of the file; programme audio cuts a row. On a channel whose breaks nearly always carry audio heard before, a break Comskip reports with none is left for the final pass. Those rows go to the log and the status on the settings page only; what is published does not change. A profile can turn the audio off for its channels. Recordings whose channel the plugin does not know are not listened to.
 
 The status lists, for each recording in progress, how many kept recordings it is matched against and the rows it would publish.
+
+A channel profile with *Publish from audio evidence* on publishes those rows instead, while its recordings are written; the final pass still replaces them. On the 15 November ITV broadcast, matched against three earlier ITV recordings, every break reached clients 4 to 14 s after it started, against a minute or more from Comskip's analyses, and no row covered more than 1.5 s of the programme. A channel whose recordings share little audio, such as Sky's NFL coverage from game to game, gains less, and is better left in shadow until it has more history. With the Comseg build of Comskip, an analysis made without the channel logo has its Comskip-only breaks held for the final pass on channels with audio history.
 
 ## Catchup
 
