@@ -68,7 +68,7 @@ public static class Archive
             var name = ChannelName(extInf, attributes);
             if (name is not null)
             {
-                entries.Add(new PlaylistEntry(name, ChannelNumber(attributes), ArchiveDays(attributes), line));
+                entries.Add(new PlaylistEntry(name, ChannelNumber(extInf, attributes), ArchiveDays(attributes), line));
             }
 
             extInf = null;
@@ -225,15 +225,10 @@ public static class Archive
     /// </summary>
     private static string? ChannelName(string extInf, Dictionary<string, string> attributes)
     {
-        var parts = extInf.Split(',', StringSplitOptions.RemoveEmptyEntries);
-        var name = parts.Length > 1 ? parts[^1].Trim() : null;
-        if (!string.IsNullOrWhiteSpace(name))
+        var name = NameInExtInf(extInf);
+        if (LeadingNumber(name, out var rest) is not null)
         {
-            var space = name.IndexOf(' ', StringComparison.Ordinal);
-            if (space > 0 && double.TryParse(name.AsSpan(0, space).Trim(" .".AsSpan()), NumberStyles.Float, CultureInfo.InvariantCulture, out _))
-            {
-                name = name[(space + 1)..].Trim(' ', '-');
-            }
+            name = rest;
         }
 
         if (string.IsNullOrWhiteSpace(name))
@@ -249,8 +244,12 @@ public static class Archive
         return string.IsNullOrWhiteSpace(name) ? null : name.Trim();
     }
 
-    /// <summary>Jellyfin's rule (M3uParser.GetChannelNumber), less its fallback to a number in the name: tvg-chno, else a numeric tvg-id or channel-id.</summary>
-    private static string? ChannelNumber(Dictionary<string, string> attributes)
+    /// <summary>
+    /// Jellyfin's rule (M3uParser.GetChannelNumber), less its last resort of a
+    /// number as the URL's file name: tvg-chno, else a numeric tvg-id or
+    /// channel-id, else the number leading the name ("84. VOX").
+    /// </summary>
+    private static string? ChannelNumber(string extInf, Dictionary<string, string> attributes)
     {
         foreach (var key in new[] { "tvg-chno", "tvg-id", "channel-id" })
         {
@@ -260,7 +259,39 @@ public static class Archive
             }
         }
 
-        return null;
+        return LeadingNumber(NameInExtInf(extInf), out _);
+    }
+
+    /// <summary>The text after the last comma of an #EXTINF line, attributes included, as Jellyfin reads it.</summary>
+    private static string? NameInExtInf(string extInf)
+    {
+        var parts = extInf.Split(',', StringSplitOptions.RemoveEmptyEntries);
+        return parts.Length > 1 ? parts[^1].Trim() : null;
+    }
+
+    /// <summary>The "84" of "84. VOX" or "84.0 - VOX", with the rest of the name; null when the name does not start with a number.</summary>
+    private static string? LeadingNumber(string? name, out string rest)
+    {
+        rest = name ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return null;
+        }
+
+        var space = name.IndexOf(' ', StringComparison.Ordinal);
+        if (space <= 0)
+        {
+            return null;
+        }
+
+        var number = name.AsSpan(0, space).Trim(" .".AsSpan());
+        if (!double.TryParse(number, NumberStyles.Float, CultureInfo.InvariantCulture, out _))
+        {
+            return null;
+        }
+
+        rest = name[(space + 1)..].Trim(' ', '-');
+        return number.ToString();
     }
 
     private static int? ArchiveDays(Dictionary<string, string> attributes)

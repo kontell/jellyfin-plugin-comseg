@@ -36,7 +36,7 @@ Jellyfin's own per-library setting *Disabled media segment providers* turns the 
 
 A client can ask the server to save a programme that has already aired from the IPTV provider's catchup archive into the recordings, as if it had been recorded. The Catchup Download add-on for Kodi does this from the TV guide's context menu.
 
-The server finds the channel in its M3U tuner's playlist by name, then by number, and copies the programme from the archive with Jellyfin's ffmpeg. It saves the programme where Jellyfin saves a recording that is not a series, with an nfo and a poster: the programme's image when the client sends one, otherwise a frame from the programme. It then has the library pick it up and runs the full pass over it.
+The server finds the channel in its M3U tuner's playlist by name, then by number, and copies the programme from the archive with Jellyfin's ffmpeg. It saves the programme where Jellyfin saves a recording that is not a series, with an nfo and a poster: the programme's image when the client sends one on a public address, otherwise a frame from the programme. It then has the library pick it up and runs the full pass over it.
 
 Downloads run one at a time. IPTV accounts allow few connections, so a download waits while Jellyfin is recording, has a recording due before the download would finish, or is showing live TV, and stops to wait again if one of those starts. It cannot see viewing that does not go through this server.
 

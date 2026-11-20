@@ -5,7 +5,9 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Net;
 using System.Net.Http;
+using System.Net.Sockets;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Channels;
@@ -43,10 +45,38 @@ public sealed class CatchupQueue : BackgroundService
     /// <summary>The longest window a job may ask for.</summary>
     public static readonly TimeSpan MaxLength = TimeSpan.FromHours(12);
 
+    private const int MaxImageBytes = 10 << 20;
+
     private static readonly TimeSpan BusyPoll = TimeSpan.FromSeconds(60);
     private static readonly TimeSpan BusyCheckWhileDownloading = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan KeepEnded = TimeSpan.FromDays(1);
     private static readonly Regex Url = new(@"[a-z]+://\S+", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    /// <summary>ffmpeg's HLS reader giving up on a segment: "Segment 1 of playlist 0 failed too many times, skipping".</summary>
+    private static readonly Regex SkippedSegment = new(@"egment \d+ .*skipping", RegexOptions.Compiled);
+
+    /// <summary>
+    /// The archive read that may stall before ffmpeg gives up, in microseconds:
+    /// a segment arrives in well under a second, so a minute is a dead connection.
+    /// </summary>
+    private static readonly string ReadTimeoutMicroseconds = ((long)TimeSpan.FromSeconds(60).TotalMicroseconds).ToString(CultureInfo.InvariantCulture);
+
+    /// <summary>
+    /// Fetches the client's programme image. The URL comes from a client, so it
+    /// may only reach public addresses, checked when each connection is made
+    /// (redirects included), and never through a proxy that would hide the address.
+    /// </summary>
+    private static readonly HttpClient Images = new(new SocketsHttpHandler
+    {
+        UseProxy = false,
+        AllowAutoRedirect = true,
+        MaxAutomaticRedirections = 3,
+        ConnectTimeout = TimeSpan.FromSeconds(10),
+        ConnectCallback = ConnectToPublicAddressAsync,
+    })
+    {
+        Timeout = TimeSpan.FromSeconds(30),
+    };
 
     private readonly ILiveTvManager _liveTv;
     private readonly ISessionManager _sessions;
@@ -61,6 +91,7 @@ public sealed class CatchupQueue : BackgroundService
     private readonly ILogger<CatchupQueue> _logger;
     private readonly Channel<CatchupJob> _queue = Channel.CreateUnbounded<CatchupJob>();
     private readonly ConcurrentDictionary<Guid, CatchupJob> _jobs = new();
+    private readonly Lock _enqueue = new();
 
     /// <summary>Initializes a new instance of the <see cref="CatchupQueue"/> class.</summary>
     /// <param name="liveTv">The live TV manager, for the timers.</param>
@@ -130,6 +161,11 @@ public sealed class CatchupQueue : BackgroundService
             return (null, "the programme has no title", 400);
         }
 
+        if (RecordingFiles.FolderName(request.Title, _fileSystem.GetValidFilename) is null)
+        {
+            return (null, "the programme's title makes no usable folder name", 400);
+        }
+
         request.StartUtc = DateTime.SpecifyKind(request.StartUtc, DateTimeKind.Utc);
         request.EndUtc = DateTime.SpecifyKind(request.EndUtc, DateTimeKind.Utc);
         var length = request.EndUtc - request.StartUtc;
@@ -159,15 +195,23 @@ public sealed class CatchupQueue : BackgroundService
             return (null, string.Create(CultureInfo.InvariantCulture, $"{entry.Name} keeps {days} days of archive; the programme is older than that"), 400);
         }
 
-        var duplicate = _jobs.Values.FirstOrDefault(j => !j.Ended && j.Channel == entry.Name && j.Request.StartUtc == request.StartUtc && j.Request.EndUtc == request.EndUtc);
-        if (duplicate is not null)
+        // Checked and added under one lock, so two identical requests at once make one job.
+        CatchupJob job;
+        lock (_enqueue)
         {
-            return (duplicate, "that programme is already queued", 409);
+            var duplicate = _jobs.Values.FirstOrDefault(j => !j.Ended && j.Channel == entry.Name && j.Request.StartUtc == request.StartUtc && j.Request.EndUtc == request.EndUtc);
+            if (duplicate is not null)
+            {
+                return (duplicate, "that programme is already queued", 409);
+            }
+
+            job = new CatchupJob(request, entry.Name, requestedBy);
+            _jobs[job.Id] = job;
+
+            // The channel is unbounded and never completed, so this always succeeds.
+            _queue.Writer.TryWrite(job);
         }
 
-        var job = new CatchupJob(request, entry.Name, requestedBy);
-        _jobs[job.Id] = job;
-        await _queue.Writer.WriteAsync(job, cancellationToken).ConfigureAwait(false);
         _logger.LogInformation(
             "Comseg: {User} queued {Title} on {Channel}, {Start:u} to {End:u}",
             requestedBy,
@@ -444,16 +488,30 @@ public sealed class CatchupQueue : BackgroundService
             UseShellExecute = false,
             CreateNoWindow = true,
         };
-        foreach (var arg in new[] { "-nostdin", "-hide_banner", "-v", "warning", "-nostats", "-progress", "pipe:1", "-y", "-i", url, "-map", "0", "-c", "copy", "-f", "mpegts", part })
+        // A segment that stalls past the read timeout, or fails, is tried twice
+        // more; after that ffmpeg skips it and still exits 0, so a skip is
+        // watched for in its output and fails the download.
+        foreach (var arg in new[] { "-nostdin", "-hide_banner", "-v", "warning", "-nostats", "-progress", "pipe:1", "-y", "-rw_timeout", ReadTimeoutMicroseconds, "-seg_max_retry", "2", "-i", url, "-map", "0", "-c", "copy", "-f", "mpegts", part })
         {
             info.ArgumentList.Add(arg);
         }
 
         using var process = new Process { StartInfo = info };
         var errors = new List<string>();
+        var skipped = 0;
         process.ErrorDataReceived += (_, e) =>
         {
-            if (e.Data is { Length: > 0 } line && errors.Count < 50)
+            if (e.Data is not { Length: > 0 } line)
+            {
+                return;
+            }
+
+            if (SkippedSegment.IsMatch(line))
+            {
+                Interlocked.Increment(ref skipped);
+            }
+
+            if (errors.Count < 50)
             {
                 errors.Add(Url.Replace(line, "<url>"));
             }
@@ -470,7 +528,7 @@ public sealed class CatchupQueue : BackgroundService
         process.Start();
         process.BeginErrorReadLine();
         process.BeginOutputReadLine();
-        string? stoppedFor = null;
+        var saved = false;
         try
         {
             var nextCheck = DateTime.UtcNow + BusyCheckWhileDownloading;
@@ -483,53 +541,68 @@ public sealed class CatchupQueue : BackgroundService
                 }
 
                 nextCheck = DateTime.UtcNow + BusyCheckWhileDownloading;
-                stoppedFor = await BusyAsync(DateTime.UtcNow.AddMinutes(5), cancellationToken).ConfigureAwait(false);
+                var stoppedFor = await BusyAsync(DateTime.UtcNow.AddMinutes(5), cancellationToken).ConfigureAwait(false);
                 if (stoppedFor is not null)
                 {
-                    process.Kill();
-                    break;
+                    return stoppedFor;
                 }
             }
 
             await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+            if (process.ExitCode != 0 || !File.Exists(part) || new FileInfo(part).Length < 1 << 20)
+            {
+                throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture, $"ffmpeg failed (exit {process.ExitCode}): {string.Join(" | ", errors.TakeLast(3))}"));
+            }
+
+            if (Volatile.Read(ref skipped) is var gaps and > 0)
+            {
+                throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture, $"the archive did not deliver {gaps} segment(s) of the programme, which would leave a gap"));
+            }
+
+            File.Move(part, target);
+            saved = true;
+            return null;
         }
-        catch (OperationCanceledException)
+        finally
+        {
+            // Every way out but a saved file, failures included, stops ffmpeg
+            // before the next job can take the connection, and clears up after it.
+            if (!saved)
+            {
+                await StopAsync(process).ConfigureAwait(false);
+                TryDelete(part);
+                TryDeleteEmptyFolder(Path.GetDirectoryName(part));
+            }
+        }
+    }
+
+    /// <summary>Kills a process that is still running and waits, briefly, for it to go.</summary>
+    private static async Task StopAsync(Process process)
+    {
+        try
         {
             if (!process.HasExited)
             {
                 process.Kill();
             }
 
-            TryDelete(part);
-            TryDeleteEmptyFolder(Path.GetDirectoryName(part));
-            throw;
+            using var wait = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            await process.WaitForExitAsync(wait.Token).ConfigureAwait(false);
         }
-
-        if (stoppedFor is not null)
+        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception or OperationCanceledException)
         {
-            TryDelete(part);
-            return stoppedFor;
+            // It exited meanwhile, or would not go in time; the file is cleared up either way.
         }
-
-        if (process.ExitCode != 0 || !File.Exists(part) || new FileInfo(part).Length < 1 << 20)
-        {
-            TryDelete(part);
-            TryDeleteEmptyFolder(Path.GetDirectoryName(part));
-            throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture, $"ffmpeg failed (exit {process.ExitCode}): {string.Join(" | ", errors.TakeLast(3))}"));
-        }
-
-        File.Move(part, target);
-        return null;
     }
 
-    /// <summary>The poster: the programme's image when it can be fetched, otherwise a frame from the recording.</summary>
+    /// <summary>The poster: the programme's image when it can be fetched from a public address, otherwise a frame from the recording.</summary>
     private async Task<string?> WritePosterAsync(string folder, string video, CatchupRequest request, int seconds, CancellationToken cancellationToken)
     {
         if (Uri.TryCreate(request.ImageUrl, UriKind.Absolute, out var image) && (image.Scheme == Uri.UriSchemeHttp || image.Scheme == Uri.UriSchemeHttps))
         {
             try
             {
-                using var response = await _http.CreateClient(NamedClient.Default).GetAsync(image, cancellationToken).ConfigureAwait(false);
+                using var response = await Images.GetAsync(image, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
                 var type = response.Content.Headers.ContentType?.MediaType ?? string.Empty;
                 var extension = type switch
                 {
@@ -538,10 +611,10 @@ public sealed class CatchupQueue : BackgroundService
                     "image/webp" => ".webp",
                     _ => null,
                 };
-                if (response.IsSuccessStatusCode && extension is not null)
+                if (response.IsSuccessStatusCode && extension is not null && response.Content.Headers.ContentLength is null or <= MaxImageBytes)
                 {
-                    var bytes = await response.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false);
-                    if (bytes.Length is > 0 and < 10 << 20)
+                    var bytes = await ReadAtMostAsync(response.Content, MaxImageBytes, cancellationToken).ConfigureAwait(false);
+                    if (bytes is { Length: > 0 })
                     {
                         var path = Path.Combine(folder, "poster" + extension);
                         await File.WriteAllBytesAsync(path, bytes, cancellationToken).ConfigureAwait(false);
@@ -551,9 +624,13 @@ public sealed class CatchupQueue : BackgroundService
 
                 _logger.LogInformation("Comseg: the image for {Title} was not usable ({Status}, {Type}); using a frame", request.Title, (int)response.StatusCode, type);
             }
-            catch (HttpRequestException ex)
+            catch (Exception ex) when (ex is HttpRequestException or IOException)
             {
                 _logger.LogInformation("Comseg: the image for {Title} could not be fetched ({Problem}); using a frame", request.Title, ex.Message);
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                _logger.LogInformation("Comseg: the image for {Title} timed out; using a frame", request.Title);
             }
         }
 
@@ -614,6 +691,48 @@ public sealed class CatchupQueue : BackgroundService
         }
 
         return null;
+    }
+
+    /// <summary>The body, or null when it is longer than <paramref name="limit"/>; read no further than that.</summary>
+    private static async Task<byte[]?> ReadAtMostAsync(HttpContent content, int limit, CancellationToken cancellationToken)
+    {
+        var stream = await content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+        await using (stream.ConfigureAwait(false))
+        {
+            using var body = new MemoryStream();
+            var chunk = new byte[81920];
+            int read;
+            while ((read = await stream.ReadAsync(chunk, cancellationToken).ConfigureAwait(false)) > 0)
+            {
+                if (body.Length + read > limit)
+                {
+                    return null;
+                }
+
+                body.Write(chunk, 0, read);
+            }
+
+            return body.ToArray();
+        }
+    }
+
+    /// <summary>Connects the image client to a public address of the host, and to nothing else.</summary>
+    private static async ValueTask<Stream> ConnectToPublicAddressAsync(SocketsHttpConnectionContext context, CancellationToken cancellationToken)
+    {
+        var addresses = await Dns.GetHostAddressesAsync(context.DnsEndPoint.Host, cancellationToken).ConfigureAwait(false);
+        var address = addresses.FirstOrDefault(PublicAddress.IsPublic)
+            ?? throw new HttpRequestException(context.DnsEndPoint.Host + " is not a public address");
+        var socket = new Socket(address.AddressFamily, SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
+        try
+        {
+            await socket.ConnectAsync(new IPEndPoint(address, context.DnsEndPoint.Port), cancellationToken).ConfigureAwait(false);
+            return new NetworkStream(socket, ownsSocket: true);
+        }
+        catch
+        {
+            socket.Dispose();
+            throw;
+        }
     }
 
     /// <summary>Removes a programme folder this job made when nothing was saved in it.</summary>

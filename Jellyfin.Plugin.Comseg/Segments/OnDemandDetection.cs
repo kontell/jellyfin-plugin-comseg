@@ -69,6 +69,11 @@ public sealed class OnDemandDetection
 
                     return breaks.Count;
                 }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    // The caller cancelled (a catchup job): let it say so, rather than report no result.
+                    throw;
+                }
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Comseg: {Why} detection failed for {Name}", why, item.Name);

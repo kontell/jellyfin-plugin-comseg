@@ -1,5 +1,6 @@
 using System;
 using System.Linq;
+using System.Net;
 using System.Text;
 using System.Xml.Linq;
 using Jellyfin.Plugin.Comseg.Catchup;
@@ -53,6 +54,18 @@ public class CatchupTests
         // A name the playlist does not have falls back to the number.
         Assert.Equal("ITV 4", Archive.Find(entries, "My ITV4", "104")!.Name);
         Assert.Null(Archive.Find(entries, "Nothing", "999"));
+    }
+
+    [Fact]
+    public void ANumberLeadingTheNameIsTheChannelNumberWhenNoAttributeGivesOne()
+    {
+        var entries = Archive.ParsePlaylist("#EXTM3U\n#EXTINF:-1,84. News\nhttp://tv.example/ch0004/index.m3u8\n#EXTINF:-1 tvg-chno=\"7\",85.0 - Sport\nhttp://tv.example/ch0005/index.m3u8\n");
+        Assert.Equal(new PlaylistEntry("News", "84", null, "http://tv.example/ch0004/index.m3u8"), entries[0]);
+        Assert.Equal("News", Archive.Find(entries, "Renamed", "84")!.Name);
+
+        // An attribute still comes first, as in Jellyfin.
+        Assert.Equal("Sport", entries[1].Name);
+        Assert.Equal("7", entries[1].Number);
     }
 
     [Fact]
@@ -132,6 +145,47 @@ public class CatchupTests
         Assert.Equal("/dvr/Wales v New Zealand  Nations Championship", folder);
         var stamp = start.ToLocalTime().ToString("yyyy_MM_dd_HH_mm_ss", System.Globalization.CultureInfo.InvariantCulture);
         Assert.Equal(folder + "/Wales v New Zealand  Nations Championship " + stamp, fileBase);
+    }
+
+    [Fact]
+    public void ATitleThatIsNotOneFolderIsRefused()
+    {
+        static string Valid(string name) => name.Replace("?", string.Empty, StringComparison.Ordinal);
+        foreach (var title in new[] { "..", ".", "...", "???", " ? ", "a/b", @"a\b" })
+        {
+            Assert.Null(RecordingFiles.FolderName(title, Valid));
+        }
+
+        Assert.Equal("Match of the Day", RecordingFiles.FolderName(" Match of the Day? ", Valid));
+        Assert.Equal("...And Justice for All", RecordingFiles.FolderName("...And Justice for All", Valid));
+        Assert.Throws<ArgumentException>(() => RecordingFiles.Paths("/dvr", "..", DateTime.UtcNow, Valid));
+    }
+
+    [Theory]
+    [InlineData("8.8.8.8", true)]
+    [InlineData("172.32.0.1", true)]
+    [InlineData("2001:4860:4860::8888", true)]
+    [InlineData("::ffff:8.8.8.8", true)]
+    [InlineData("64:ff9b::808:808", true)]
+    [InlineData("127.0.0.1", false)]
+    [InlineData("10.1.2.3", false)]
+    [InlineData("172.16.0.1", false)]
+    [InlineData("172.31.255.255", false)]
+    [InlineData("192.168.1.5", false)]
+    [InlineData("169.254.169.254", false)]
+    [InlineData("100.64.0.1", false)]
+    [InlineData("0.0.0.0", false)]
+    [InlineData("224.0.0.1", false)]
+    [InlineData("255.255.255.255", false)]
+    [InlineData("::1", false)]
+    [InlineData("::", false)]
+    [InlineData("fe80::1", false)]
+    [InlineData("fd00::1", false)]
+    [InlineData("::ffff:192.168.1.1", false)]
+    [InlineData("64:ff9b::a00:1", false)]
+    public void OnlyPublicAddressesMayBeFetched(string address, bool expected)
+    {
+        Assert.Equal(expected, PublicAddress.IsPublic(IPAddress.Parse(address)));
     }
 
     [Fact]
