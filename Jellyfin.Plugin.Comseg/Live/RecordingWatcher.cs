@@ -672,7 +672,16 @@ public sealed class RecordingWatcher : BackgroundService
         {
             if (!await _fingerprinter.AvailableAsync(cancellationToken).ConfigureAwait(false))
             {
-                job.Audio = null;
+                // No muxer: no audio for this recording. A check that timed out is asked again next poll.
+                if (_fingerprinter.MuxerMissing)
+                {
+                    job.Audio = null;
+                }
+                else
+                {
+                    job.AudioError = "ffmpeg did not answer whether it can fingerprint; trying again";
+                }
+
                 return;
             }
 
