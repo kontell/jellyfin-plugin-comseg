@@ -55,4 +55,13 @@ public class PluginConfiguration : BasePluginConfiguration
 
     /// <summary>Gets or sets extra folders whose videos count as recordings, separated by semicolons or lines, besides Jellyfin's own recording folders.</summary>
     public string ExtraRecordingPaths { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets a value indicating whether clients may save programmes from the IPTV provider's catchup archive into the recordings.</summary>
+    public bool EnableCatchup { get; set; } = true;
+
+    /// <summary>Gets or sets how many seconds before a programme's start a catchup download asks for: the archive begins at the first segment after the time asked for.</summary>
+    public int CatchupPadSeconds { get; set; } = 10;
+
+    /// <summary>Gets or sets how many hours a catchup download waits for Jellyfin to stop using the IPTV connection before it gives up.</summary>
+    public int CatchupMaxWaitHours { get; set; } = 12;
 }

@@ -26,8 +26,29 @@ Dashboard → Plugins → Comseg.
 | Analysis height | 0 (as recorded) | 720 or 480 has Comskip analyse a copy the GPU scales down through VA-API, made as the recording is written and used again for the final pass. It costs a fraction of a core, where decoding a UHD recording costs Comskip several. An HDR recording's copy is tone mapped to SDR as well, as Jellyfin does on AMD: read as SDR, an HDR picture is too flat for Comskip to find the channel logo. Recordings that are neither taller than this nor HDR are analysed as they are, and so is a recording whose copy fails. |
 | GPU device | `/dev/dri/renderD128` | The VA-API render device that makes the copy. The user Jellyfin runs as needs access to it, as it does for hardware transcoding. Tone mapping an HDR copy also needs a Vulkan driver for it (Mesa's RADV on AMD), as Jellyfin's own tone mapping does. |
 | Extra recording folders | none | Folders outside Jellyfin's own recording paths whose videos count as recordings, separated by semicolons. |
+| Save programmes from the IPTV archive | on | Lets clients save finished programmes from the catchup archive; see [Catchup](#catchup). |
+| Seconds asked for before a programme starts | 10 | The archive begins at the first segment after the time asked for, up to a segment late. |
+| Hours a download waits for the IPTV connection | 12 | |
 
 Jellyfin's own per-library setting *Disabled media segment providers* turns the plugin off for a library: recordings there are not analysed, and rows stored earlier are read only while the provider is enabled there.
+
+## Catchup
+
+A client can ask the server to save a programme that has already aired from the IPTV provider's catchup archive into the recordings, as if it had been recorded. The Catchup Download add-on for Kodi does this from the TV guide's context menu.
+
+The server finds the channel in its M3U tuner's playlist by name, then by number, and copies the programme from the archive with Jellyfin's ffmpeg. It saves the programme where Jellyfin saves a recording that is not a series, with an nfo and a poster: the programme's image when the client sends one, otherwise a frame from the programme. It then has the library pick it up and runs the full pass over it.
+
+Downloads run one at a time. IPTV accounts allow few connections, so a download waits while Jellyfin is recording, has a recording due before the download would finish, or is showing live TV, and stops to wait again if one of those starts. It cannot see viewing that does not go through this server.
+
+The provider's archive must be Flussonic-style: a channel URL ending in `NAME.m3u8`, whose archive answers `archive-<start>-<seconds>.m3u8`. The plugin checks the archive's playlist before downloading, because such archives answer a wrong token, a time outside the archive or a start in the future with HTTP 200 and a stand-in video or the live channel. Jobs are kept in memory, so a server restart drops the queue.
+
+```
+POST   /Comseg/Catchup        queue a programme (202 with the job; 400, 404, 409 or 503 with the reason)
+GET    /Comseg/Catchup        the jobs of the last day
+DELETE /Comseg/Catchup/{id}   cancel a job
+```
+
+These need permission to manage live TV recordings. The request body is `ChannelName`, `ChannelNumber`, `StartUtc`, `EndUtc`, `Title`, `Plot` and `ImageUrl`.
 
 ## API (admin)
 

@@ -1,3 +1,4 @@
+using Jellyfin.Plugin.Comseg.Catchup;
 using Jellyfin.Plugin.Comseg.Comskip;
 using Jellyfin.Plugin.Comseg.Live;
 using Jellyfin.Plugin.Comseg.Providers;
@@ -34,6 +35,8 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddSingleton<RecordingWatcher>();
         serviceCollection.AddHostedService(provider => provider.GetRequiredService<RecordingWatcher>());
         serviceCollection.AddSingleton<OnDemandDetection>();
+        serviceCollection.AddSingleton<CatchupQueue>();
+        serviceCollection.AddHostedService(provider => provider.GetRequiredService<CatchupQueue>());
         serviceCollection.AddSingleton<IMediaSegmentProvider, ComsegSegmentProvider>();
     }
 }

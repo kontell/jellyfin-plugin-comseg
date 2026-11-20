@@ -88,6 +88,22 @@
                         <input is="emby-input" type="text" id="txtExtraPaths" label="Extra recording folders" />
                         <div class="fieldDescription">Separate several with semicolons. Jellyfin's own recording folders are always included.</div>
                     </div>
+                    <h3>Catchup</h3>
+                    <div class="checkboxContainer checkboxContainer-withDescription">
+                        <label class="emby-checkbox-label">
+                            <input is="emby-checkbox" type="checkbox" id="chkCatchup" />
+                            <span>Save programmes from the IPTV archive</span>
+                        </label>
+                        <div class="fieldDescription checkboxDescription">Let clients, such as the Catchup Download add-on for Kodi, save a finished programme from the M3U provider's catchup archive into the recordings. Users need permission to manage live TV recordings. Works with Flussonic-style archives.</div>
+                    </div>
+                    <div class="inputContainer">
+                        <input is="emby-input" type="number" id="txtCatchupPad" pattern="[0-9]*" min="0" max="120" label="Seconds asked for before a programme starts" />
+                        <div class="fieldDescription">The archive begins at the first segment after the time asked for, up to a segment late.</div>
+                    </div>
+                    <div class="inputContainer">
+                        <input is="emby-input" type="number" id="txtCatchupWait" pattern="[0-9]*" min="1" max="48" label="Hours a download waits for the IPTV connection" />
+                        <div class="fieldDescription">A download waits while Jellyfin records, has a recording due, or shows live TV, and stops to wait again if one of those starts.</div>
+                    </div>
                     <br />
                     <button is="emby-button" type="submit" class="raised button-submit block">
                         <span>Save</span>
@@ -119,6 +135,9 @@
                     setValue('#txtWorkDirectory', config.WorkDirectory || '');
                     document.querySelector('#chkLive').checked = !!config.EnableLiveDetection;
                     document.querySelector('#chkCompleted').checked = !!config.EnableCompletedDetection;
+                    document.querySelector('#chkCatchup').checked = !!config.EnableCatchup;
+                    setValue('#txtCatchupPad', config.CatchupPadSeconds);
+                    setValue('#txtCatchupWait', config.CatchupMaxWaitHours);
                     setValue('#txtInterval', config.LiveMasterIntervalSeconds);
                     setValue('#txtConfirm', config.ConfirmPasses);
                     setValue('#txtMinBreak', config.MinBreakSeconds);
@@ -188,6 +207,9 @@
                     config.WorkDirectory = document.querySelector('#txtWorkDirectory').value.trim();
                     config.EnableLiveDetection = document.querySelector('#chkLive').checked;
                     config.EnableCompletedDetection = document.querySelector('#chkCompleted').checked;
+                    config.EnableCatchup = document.querySelector('#chkCatchup').checked;
+                    config.CatchupPadSeconds = num('#txtCatchupPad', 10);
+                    config.CatchupMaxWaitHours = num('#txtCatchupWait', 12);
                     config.LiveMasterIntervalSeconds = num('#txtInterval', 60);
                     config.ConfirmPasses = num('#txtConfirm', 2);
                     config.MinBreakSeconds = num('#txtMinBreak', 20);
