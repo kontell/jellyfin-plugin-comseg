@@ -66,7 +66,8 @@ public static class Program
                     options.Required("out"),
                     options.One("final"),
                     options.Number("final-at"),
-                    options.Int("min-break") ?? 20),
+                    options.Int("min-break") ?? 20,
+                    options.Flag("verbose")),
                 _ => throw new ArgumentException("unknown command: " + args[0]),
             };
         }

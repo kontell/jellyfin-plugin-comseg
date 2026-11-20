@@ -149,9 +149,12 @@ public static class AudioLabels
         var storedEnd = storedStart + length;
         var inside = storedBreaks.Sum(b => Math.Max(0, Math.Min(b.End, storedEnd) - Math.Max(b.Start, storedStart)));
         var share = inside / length;
+        // Programme audio only well clear of the stored breaks: next to one it is as likely a sponsor
+        // clip the stored break's edge, Comskip's, was a few seconds short of.
+        var nearEdge = storedBreaks.Any(b => storedStart < b.End + EdgeReach && storedEnd > b.Start - EdgeReach);
         AudioSpan? span = share >= AdvertShare
             ? new AudioSpan(liveStart, liveStart + length, AudioKind.Advert)
-            : share <= ProgrammeShare ? new AudioSpan(liveStart, liveStart + length, AudioKind.Programme) : null;
+            : share <= ProgrammeShare && !nearEdge ? new AudioSpan(liveStart, liveStart + length, AudioKind.Programme) : null;
 
         var edges = new List<AudioEdge>();
         foreach (var b in storedBreaks)

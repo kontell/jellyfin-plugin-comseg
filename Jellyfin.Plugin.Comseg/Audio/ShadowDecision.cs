@@ -29,7 +29,8 @@ public readonly record struct DecidedRow(Break Break, RowSource Source);
 /// the audio evidence, by the plan of 2026-11-15:
 ///
 /// A break opens on audio when two advert stretches fall within a minute of
-/// each other, or an advert stretch follows a break start the audio implies;
+/// each other, or an advert stretch is an edge clip, one that marked a break's
+/// start or end in a stored recording (its role here comes from context);
 /// one advert match alone never opens a break, because a promo quotes the
 /// programme it sells. Its start is the implied edge, else the first advert;
 /// its end the implied end edge, else the last advert heard.
@@ -62,8 +63,9 @@ public static class ShadowDecision
     /// <param name="audio">The audio evidence.</param>
     /// <param name="minBreak">The shortest break published, seconds.</param>
     /// <param name="trustAudio">Whether the channel's audio is trusted.</param>
+    /// <param name="heard">How far the recording has been heard: a break ending within 30 s of it may still be on air, and is not held to the shortest length yet.</param>
     /// <returns>The rows, in order.</returns>
-    public static IReadOnlyList<DecidedRow> Decide(IReadOnlyList<Break>? latest, IReadOnlyList<Break>? previous, AudioEvidence audio, double minBreak, bool trustAudio = false)
+    public static IReadOnlyList<DecidedRow> Decide(IReadOnlyList<Break>? latest, IReadOnlyList<Break>? previous, AudioEvidence audio, double minBreak, bool trustAudio = false, double heard = double.MaxValue)
     {
         var adverts = audio.Adverts;
         var edges = audio.Edges;
@@ -78,12 +80,17 @@ public static class ShadowDecision
             var first = group[0];
             var last = group[^1];
             var start = Nearest(edges, true, first.Start, first.Start - Gap, first.Start + 5);
-            if (audio.AdvertMatchesIn(first.Start, last.End) < 2 && start is null)
+            // An edge clip opens a break whichever edge it marked before: sponsors swap
+            // ends between broadcasts, so a clip that closed the stored breaks can open this one.
+            var edgeClip = start is not null || edges.Any(e => !e.IsStart && e.At >= first.Start && e.At <= first.End + AudioLabels.EdgeReach + 1);
+            if (audio.AdvertMatchesIn(first.Start, last.End) < 2 && !edgeClip)
             {
                 continue;
             }
 
-            var end = Nearest(edges, false, last.End, last.End - 5, last.End + 30);
+            // A clip that closed the stored breaks and opens this one: the ends it implies are its old role's.
+            var openedByClosingClip = start is null && edgeClip;
+            var end = Nearest(edges.Where(e => !openedByClosingClip || e.At > first.End + AudioLabels.EdgeReach + 1).ToList(), false, last.End, last.End - 5, last.End + 30);
             rows.Add(new DecidedRow(new Break(start ?? first.Start, end ?? last.End), RowSource.Audio));
             known.Add((start is not null, end is not null));
         }
@@ -99,9 +106,9 @@ public static class ShadowDecision
             double end;
             if (growing)
             {
-                var heard = adverts.Where(a => a.End > b.Start && a.Start < b.End).Select(a => a.End).DefaultIfEmpty(double.MinValue).Max();
+                var heardAdverts = adverts.Where(a => a.End > b.Start && a.Start < b.End).Select(a => a.End).DefaultIfEmpty(double.MinValue).Max();
                 var edge = Nearest(edges, false, b.End, b.Start, b.End);
-                end = Math.Max(before!.Value.End, Math.Max(heard, edge ?? double.MinValue));
+                end = Math.Max(before!.Value.End, Math.Max(heardAdverts, edge ?? double.MinValue));
                 end = Math.Min(end, b.End);
             }
             else
@@ -124,7 +131,7 @@ public static class ShadowDecision
             rows.AddRange(comskipRows);
         }
 
-        return Cut(Merge(rows), audio.Programme).Where(r => r.Break.Length >= minBreak).ToList();
+        return Cut(Merge(rows), audio.Programme).Where(r => r.Break.Length >= minBreak || r.Break.End > heard - 30).ToList();
     }
 
     /// <summary>An audio break widened by the Comskip breaks that overlap it, a little at each end the audio did not fix.</summary>

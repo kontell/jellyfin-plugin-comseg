@@ -34,6 +34,9 @@ public class ChannelProfile
     /// <summary>Gets or sets a value indicating whether these channels' audio is kept and listened to (see the plugin's audio evidence setting).</summary>
     public bool AudioEvidence { get; set; } = true;
 
+    /// <summary>Gets or sets a value indicating whether, while these channels record, the rows clients see come from the audio decision rather than Comskip's analyses alone; needs audio evidence.</summary>
+    public bool PublishAudio { get; set; }
+
     /// <summary>Gets or sets a value indicating whether Comskip's per-frame data (its .csv and logo file) is kept after each full pass over these channels' recordings, for tuning.</summary>
     public bool KeepFrames { get; set; }
 }

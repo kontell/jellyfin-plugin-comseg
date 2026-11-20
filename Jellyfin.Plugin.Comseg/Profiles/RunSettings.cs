@@ -22,6 +22,9 @@ public sealed record RunSettings(
     /// <summary>Gets a value indicating whether the recording's audio is kept and listened to: on when the plugin's setting is, unless the profile turns it off, and only for a recording whose channel is known.</summary>
     public bool AudioEvidence => Config.EnableAudioEvidence && (Profile?.AudioEvidence ?? true) && Record is not null;
 
+    /// <summary>Gets a value indicating whether the audio decision's rows are published while the recording is written: the profile asks for it and audio evidence is on.</summary>
+    public bool PublishAudio => AudioEvidence && (Profile?.PublishAudio ?? false);
+
     /// <summary>Gets a value indicating whether Comskip's per-frame data is kept after a full pass.</summary>
     public bool KeepFrames => Profile?.KeepFrames ?? false;
 

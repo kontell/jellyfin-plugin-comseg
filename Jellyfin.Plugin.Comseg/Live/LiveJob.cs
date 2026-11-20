@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.Comseg.Audio;
@@ -112,6 +113,18 @@ public sealed class LiveJob
     /// the rows the previous run stored until it confirms breaks of its own.
     /// </summary>
     public IReadOnlyList<Break>? LiveBreaks => Tracker.Confirmed.Count > 0 || Published > 0 ? Tracker.Confirmed : null;
+
+    /// <summary>Gets a value indicating whether the audio decision's rows are published, not the tracker's: the profile asks for it and the recording is listened to.</summary>
+    public bool PublishesAudio => Audio is not null && Settings.PublishAudio;
+
+    /// <summary>
+    /// Gets the breaks to publish while the recording is written: the audio
+    /// decision's when <see cref="PublishesAudio"/>, else the tracker's; null
+    /// until there is anything to store, as for <see cref="LiveBreaks"/>.
+    /// </summary>
+    public IReadOnlyList<Break>? PublishableBreaks => PublishesAudio
+        ? (Audio!.Rows.Count > 0 || Published > 0 ? Audio.Rows.Select(r => r.Break).ToList() : null)
+        : LiveBreaks;
 
     /// <summary>Gets or sets the recording file's last write time when the job saw the recording end.</summary>
     public DateTime ClosedWriteUtc
