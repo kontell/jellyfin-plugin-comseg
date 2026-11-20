@@ -63,7 +63,7 @@ public static class ShadowDecision
     /// <param name="audio">The audio evidence.</param>
     /// <param name="minBreak">The shortest break published, seconds.</param>
     /// <param name="trustAudio">Whether the channel's audio is trusted.</param>
-    /// <param name="heard">How far the recording has been heard: a break ending within 30 s of it may still be on air, and is not held to the shortest length yet.</param>
+    /// <param name="heard">How far the recording has been heard: a break the audio found that ends within 30 s of it may still be on air, and is not held to the shortest length yet.</param>
     /// <returns>The rows, in order.</returns>
     public static IReadOnlyList<DecidedRow> Decide(IReadOnlyList<Break>? latest, IReadOnlyList<Break>? previous, AudioEvidence audio, double minBreak, bool trustAudio = false, double heard = double.MaxValue)
     {
@@ -131,7 +131,9 @@ public static class ShadowDecision
             rows.AddRange(comskipRows);
         }
 
-        return Cut(Merge(rows), audio.Programme).Where(r => r.Break.Length >= minBreak || r.Break.End > heard - 30).ToList();
+        return Cut(Merge(rows), audio.Programme)
+            .Where(r => r.Break.Length >= minBreak || ((r.Source & RowSource.Audio) != 0 && r.Break.End > heard - 30))
+            .ToList();
     }
 
     /// <summary>An audio break widened by the Comskip breaks that overlap it, a little at each end the audio did not fix.</summary>

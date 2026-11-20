@@ -222,4 +222,50 @@ public class AudioDecisionTests
         // Once the break is over, a row that short is not a break.
         Assert.Empty(ShadowDecision.Decide(null, null, Evidence([Advert(2410, 2420)], [new AudioEdge(2427, false)]), 20, heard: 2600));
     }
+
+    [Fact]
+    public void AStatusThatCannotBeReadKeepsTheLastOne()
+    {
+        var dir = Directory.CreateTempSubdirectory("comseg-status-").FullName;
+        try
+        {
+            var path = Path.Combine(dir, "rec.master.status");
+            var last = Jellyfin.Plugin.Comseg.Comskip.AnalysisStatus.Parse("logo=none\n");
+
+            // None written: an older build, whatever came before.
+            Assert.Null(Jellyfin.Plugin.Comseg.Comskip.AnalysisStatus.Read(path, last));
+
+            // Written but making no sense: the last one stands.
+            File.WriteAllText(path, "frames=12\n");
+            Assert.Same(last, Jellyfin.Plugin.Comseg.Comskip.AnalysisStatus.Read(path, last));
+
+            File.WriteAllText(path, "logo=found\n");
+            Assert.False(Jellyfin.Plugin.Comseg.Comskip.AnalysisStatus.Read(path, last)!.WithoutLogo);
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
+    public void AShortComskipRowIsNotSparedForBeingRecent()
+    {
+        // Comskip alone, 10 s long, ending near the edge: under the shortest length, and no audio says a break is on air.
+        Assert.Empty(ShadowDecision.Decide([new Break(2410, 2420)], null, Evidence([], []), 20, heard: 2430));
+    }
+
+    [Fact]
+    public void ANewAnalysisReachesTheRowsWithoutNewAudio()
+    {
+        var shadow = new AudioShadow([]);
+        shadow.Hear(0, AudioMatchTests.Noise(Fingerprint.ItemAt(700), 21));
+        shadow.Decide(20);
+        Assert.Empty(shadow.Rows);
+
+        // Fingerprinting fails from here on; Comskip still reports a break.
+        shadow.Analysed([new Break(500, 600)]);
+        Assert.True(shadow.Decide(20));
+        Assert.Equal(new Break(500, 600), shadow.Rows.Single().Break);
+    }
 }

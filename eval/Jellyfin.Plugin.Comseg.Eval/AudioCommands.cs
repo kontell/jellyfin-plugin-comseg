@@ -95,7 +95,8 @@ internal static class AudioCommands
             var seen = analyses.Where(a => a.T <= now).ToList();
             var latest = seen.Count > 0 ? seen[^1].Breaks : null;
             var previous = seen.Count > 1 ? seen[^2].Breaks : null;
-            var rows = ShadowDecision.Decide(latest, previous, listener.Evidence, minBreak, trust, now).Select(r => r.Break).ToList();
+            var hold = AudioShadow.HoldsBack(trust, seen.Count > 0 ? seen[^1].Status : null, store.Count);
+            var rows = ShadowDecision.Decide(latest, previous, listener.Evidence, minBreak, hold, now).Select(r => r.Break).ToList();
             if (!rows.SequenceEqual(shown))
             {
                 entries.Add(new Timeline.Entry(now, rows));
