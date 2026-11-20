@@ -125,6 +125,7 @@ public sealed class AudioStore
     /// <param name="channel">The channel's name.</param>
     /// <param name="except">A recording to leave out (the one being matched), or null.</param>
     /// <returns>The recordings.</returns>
+    /// <exception cref="IOException">The channel's folder cannot be listed.</exception>
     public IReadOnlyList<StoredRecording> Load(string channel, string? except = null)
     {
         var list = new List<StoredRecording>();
@@ -169,21 +170,16 @@ public sealed class AudioStore
 
     private static bool Expired(StoredRecordingInfo info) => DateTime.UtcNow - (info.StartUtc ?? info.AddedUtc) > MaxAge;
 
-    /// <summary>A channel's entries with readable metadata and a fingerprint file, newest first; none when the folder cannot be read.</summary>
+    /// <summary>
+    /// A channel's entries with readable metadata and a fingerprint file,
+    /// newest first. A folder that cannot be listed throws, so that a caller
+    /// can tell it from a channel with no history.
+    /// </summary>
     private List<(StoredRecordingInfo Info, string Fp)> Entries(string channel)
     {
         var dir = Folder(channel);
         var entries = new List<(StoredRecordingInfo, string)>();
-        string[] files;
-        try
-        {
-            files = Directory.Exists(dir) ? Directory.GetFiles(dir, "*.json") : [];
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            _logger.LogWarning("Comseg: could not read the kept audio of {Channel}: {Problem}", channel, ex.Message);
-            return entries;
-        }
+        var files = Directory.Exists(dir) ? Directory.GetFiles(dir, "*.json") : [];
 
         foreach (var json in files)
         {

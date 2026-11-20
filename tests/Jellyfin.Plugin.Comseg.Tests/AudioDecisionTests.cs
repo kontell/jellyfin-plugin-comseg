@@ -168,7 +168,12 @@ public class AudioDecisionTests
             var store = new AudioStore(new FakePaths(root), NullLogger<AudioStore>.Instance);
             var items = AudioMatchTests.Noise(100, 1);
             store.Add(new StoredRecordingInfo("/a.ts", "ITV 1", DateTime.UtcNow.AddDays(-1), DateTime.UtcNow, 12, []), items);
-            store.Add(new StoredRecordingInfo("/b.ts", "ITV 1", DateTime.UtcNow.AddDays(-50), DateTime.UtcNow, 12, []), items);
+            store.Add(new StoredRecordingInfo("/b.ts", "ITV 1", DateTime.UtcNow.AddDays(-2), DateTime.UtcNow, 12, []), items);
+            Assert.Equal(2, store.Count("ITV 1"));
+
+            // b ages past 45 days with nothing new stored to prune it: it is not loaded.
+            var bJson = Directory.GetFiles(root, "*.json", SearchOption.AllDirectories).Single(f => File.ReadAllText(f).Contains("/b.ts", StringComparison.Ordinal));
+            File.WriteAllText(bJson, File.ReadAllText(bJson).Replace(DateTime.UtcNow.AddDays(-2).ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture), DateTime.UtcNow.AddDays(-50).ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal));
             Assert.Equal(["/a.ts"], store.Load("ITV 1").Select(r => r.Info.Path));
             Assert.Equal(1, store.Count("ITV 1"));
             Assert.Empty(store.Load("ITV 4"));
