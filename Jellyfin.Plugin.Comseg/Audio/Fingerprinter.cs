@@ -56,6 +56,13 @@ public sealed class Fingerprinter
         }
 
         var (code, output) = await RunAsync(["-hide_banner", "-muxers"], TimeSpan.FromSeconds(15), cancellationToken).ConfigureAwait(false);
+        if (code == -2)
+        {
+            // A stalled check says nothing about the muxer: not cached, asked again next time.
+            _logger.LogWarning("Comseg: ffmpeg did not answer whether it has the chromaprint muxer; audio evidence waits for it");
+            return false;
+        }
+
         var text = System.Text.Encoding.UTF8.GetString(output);
         _available = code == 0 && text.Contains(" chromaprint ", StringComparison.Ordinal);
         if (_available == false)
