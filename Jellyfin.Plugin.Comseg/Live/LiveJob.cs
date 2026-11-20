@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using Jellyfin.Plugin.Comseg.Audio;
 using Jellyfin.Plugin.Comseg.Comskip;
 using Jellyfin.Plugin.Comseg.Edl;
 using Jellyfin.Plugin.Comseg.Profiles;
@@ -56,6 +57,12 @@ public sealed class LiveJob
 
     /// <summary>Gets a value indicating whether a live Comskip analyses the recording; when not, the job only runs the full pass once it ends.</summary>
     public bool AnalysesLive => Settings.LiveDetection;
+
+    /// <summary>Gets or sets the audio decision run in shadow, when the recording's audio is listened to.</summary>
+    public AudioShadow? Audio { get; set; }
+
+    /// <summary>Gets or sets the last problem with the audio, for the status page.</summary>
+    public string? AudioError { get; set; }
 
     /// <summary>Gets when the job started.</summary>
     public DateTime StartedUtc { get; }

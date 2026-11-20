@@ -31,6 +31,9 @@ public class ChannelProfile
     /// <summary>Gets or sets a value indicating whether these channels' recordings are analysed while they record; when off, they get the full pass once they finish.</summary>
     public bool LiveDetection { get; set; } = true;
 
+    /// <summary>Gets or sets a value indicating whether these channels' audio is kept and listened to (see the plugin's audio evidence setting).</summary>
+    public bool AudioEvidence { get; set; } = true;
+
     /// <summary>Gets or sets a value indicating whether Comskip's per-frame data (its .csv and logo file) is kept after each full pass over these channels' recordings, for tuning.</summary>
     public bool KeepFrames { get; set; }
 }

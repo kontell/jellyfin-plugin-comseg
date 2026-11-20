@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Jellyfin.Plugin.Comseg.Audio;
 using Jellyfin.Plugin.Comseg.Configuration;
 using Jellyfin.Plugin.Comseg.Edl;
 using Jellyfin.Plugin.Comseg.Profiles;
@@ -26,6 +27,7 @@ public sealed class CompletedPass
     private readonly Workspace _workspace;
     private readonly ScaledCopy _copies;
     private readonly ProfileSelector _profiles;
+    private readonly AudioLearner _learner;
     private readonly ILogger<CompletedPass> _logger;
 
     /// <summary>Initializes a new instance of the <see cref="CompletedPass"/> class.</summary>
@@ -33,13 +35,15 @@ public sealed class CompletedPass
     /// <param name="workspace">The workspace.</param>
     /// <param name="copies">The scaled copies.</param>
     /// <param name="profiles">The channel profiles.</param>
+    /// <param name="learner">The audio learner, which keeps the recording's audio for its channel.</param>
     /// <param name="logger">The logger.</param>
-    public CompletedPass(ComskipRunner runner, Workspace workspace, ScaledCopy copies, ProfileSelector profiles, ILogger<CompletedPass> logger)
+    public CompletedPass(ComskipRunner runner, Workspace workspace, ScaledCopy copies, ProfileSelector profiles, AudioLearner learner, ILogger<CompletedPass> logger)
     {
         _runner = runner;
         _workspace = workspace;
         _copies = copies;
         _profiles = profiles;
+        _learner = learner;
         _logger = logger;
     }
 
@@ -120,6 +124,7 @@ public sealed class CompletedPass
             var min = Math.Max(0, config.MinBreakSeconds);
             var breaks = EdlParser.ReadFile(result.EdlPath).Where(b => b.Length >= min).ToList();
             _logger.LogInformation("Comseg: {Count} commercial breaks in {Media} after {Elapsed:mm\\:ss}", breaks.Count, mediaPath, result.Elapsed);
+            _learner.Learn(mediaPath, settings, breaks);
             return breaks;
         }
         finally
