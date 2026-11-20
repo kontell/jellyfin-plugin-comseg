@@ -129,7 +129,8 @@ public sealed class RecordingRecords
                 try
                 {
                     var record = JsonSerializer.Deserialize<RecordingRecord>(File.ReadAllText(file), Json);
-                    var root = record is null ? null : roots.FirstOrDefault(r => RecordingPaths.IsUnder(record.Path, [r]));
+                    // The most specific root that holds it: a folder configured inside another may be the one missing.
+                    var root = record is null ? null : roots.Where(r => RecordingPaths.IsUnder(record.Path, [r])).MaxBy(r => r.TrimEnd('/', '\\').Length);
                     if (record is null || (root is not null && Directory.Exists(root) && !File.Exists(record.Path)))
                     {
                         lock (_writes)

@@ -184,7 +184,7 @@
 
             // Lists may have been saved one item a line; the fields are one line, with semicolons.
             function oneLine(value) {
-                return (value || '').split(/\r?\n/).map(function (s) { return s.trim(); }).filter(Boolean).join('; ');
+                return (value || '').split(/\r\n|\r|\n/).map(function (s) { return s.trim(); }).filter(Boolean).join('; ');
             }
 
             function renderProfiles(list) {
