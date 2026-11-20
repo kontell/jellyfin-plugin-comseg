@@ -55,7 +55,7 @@ public sealed class Fingerprinter
             return known;
         }
 
-        var (code, output) = await RunAsync(["-hide_banner", "-muxers"], cancellationToken).ConfigureAwait(false);
+        var (code, output) = await RunAsync(["-hide_banner", "-muxers"], TimeSpan.FromSeconds(15), cancellationToken).ConfigureAwait(false);
         var text = System.Text.Encoding.UTF8.GetString(output);
         _available = code == 0 && text.Contains(" chromaprint ", StringComparison.Ordinal);
         if (_available == false)
@@ -70,9 +70,10 @@ public sealed class Fingerprinter
     /// <param name="path">The recording.</param>
     /// <param name="from">Where to start, in seconds; the items line up with the whole recording's from item round(from / hop).</param>
     /// <param name="seconds">How much to take, or null for the rest of the file as it stands.</param>
+    /// <param name="timeout">How long ffmpeg may take before it is killed and the extraction fails.</param>
     /// <param name="cancellationToken">Cancellation.</param>
-    /// <returns>The items, or null when ffmpeg failed.</returns>
-    public async Task<uint[]?> ExtractAsync(string path, double from, double? seconds, CancellationToken cancellationToken)
+    /// <returns>The items, or null when ffmpeg failed or ran out of time.</returns>
+    public async Task<uint[]?> ExtractAsync(string path, double from, double? seconds, TimeSpan timeout, CancellationToken cancellationToken)
     {
         var args = new System.Collections.Generic.List<string> { "-nostdin", "-hide_banner", "-v", "error" };
         if (from > 0)
@@ -87,7 +88,7 @@ public sealed class Fingerprinter
         }
 
         args.AddRange(["-vn", "-map", "0:a:0", "-ac", "1", "-ar", "11025", "-f", "chromaprint", "-fp_format", "raw", "-"]);
-        var (code, output) = await RunAsync(args, cancellationToken).ConfigureAwait(false);
+        var (code, output) = await RunAsync(args, timeout, cancellationToken).ConfigureAwait(false);
         if (code != 0)
         {
             _logger.LogDebug("Comseg: fingerprinting {Path} from {From} s failed (exit {Code})", path, from, code);
@@ -97,7 +98,8 @@ public sealed class Fingerprinter
         return Fingerprint.FromBytes(output);
     }
 
-    private async Task<(int Code, byte[] Output)> RunAsync(System.Collections.Generic.IEnumerable<string> args, CancellationToken cancellationToken)
+    /// <summary>Runs ffmpeg; a run past its time limit is killed and reported as exit code -2, while the caller's cancellation still throws.</summary>
+    private async Task<(int Code, byte[] Output)> RunAsync(System.Collections.Generic.IEnumerable<string> args, TimeSpan timeout, CancellationToken cancellationToken)
     {
         var info = new ProcessStartInfo
         {
@@ -127,10 +129,18 @@ public sealed class Fingerprinter
 
         process.BeginErrorReadLine();
         using var output = new MemoryStream();
+        using var limit = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        limit.CancelAfter(timeout);
         try
         {
-            await process.StandardOutput.BaseStream.CopyToAsync(output, cancellationToken).ConfigureAwait(false);
-            await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+            await process.StandardOutput.BaseStream.CopyToAsync(output, limit.Token).ConfigureAwait(false);
+            await process.WaitForExitAsync(limit.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            ComskipRunner.TryKill(process);
+            _logger.LogWarning("Comseg: ffmpeg took longer than {Timeout} fingerprinting and was stopped", timeout);
+            return (-2, []);
         }
         catch (OperationCanceledException)
         {

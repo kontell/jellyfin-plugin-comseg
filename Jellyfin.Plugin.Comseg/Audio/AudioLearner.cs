@@ -54,7 +54,8 @@ public sealed class AudioLearner
                     return;
                 }
 
-                var items = await _fingerprinter.ExtractAsync(mediaPath, 0, null, CancellationToken.None).ConfigureAwait(false);
+                // A few seconds an hour; the limit only stops a stalled ffmpeg holding up every later recording.
+                var items = await _fingerprinter.ExtractAsync(mediaPath, 0, null, TimeSpan.FromMinutes(15), CancellationToken.None).ConfigureAwait(false);
                 if (items is null || items.Length == 0)
                 {
                     _logger.LogWarning("Comseg: could not fingerprint {Media}; its audio is not kept", mediaPath);

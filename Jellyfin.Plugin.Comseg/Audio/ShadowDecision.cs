@@ -78,7 +78,7 @@ public static class ShadowDecision
             var first = group[0];
             var last = group[^1];
             var start = Nearest(edges, true, first.Start, first.Start - Gap, first.Start + 5);
-            if (group.Count < 2 && start is null)
+            if (audio.AdvertMatchesIn(first.Start, last.End) < 2 && start is null)
             {
                 continue;
             }
@@ -93,7 +93,7 @@ public static class ShadowDecision
         var comskipRows = new List<DecidedRow>();
         foreach (var b in latest ?? [])
         {
-            var before = previous?.FirstOrDefault(p => Math.Abs(p.Start - b.Start) <= 5);
+            Break? before = previous?.Where(p => Math.Abs(p.Start - b.Start) <= 5).Select(p => (Break?)p).FirstOrDefault();
             var growing = before is { } p0 && b.End - p0.End > 20;
             var start = Nearest(edges, true, b.Start, b.Start - Snap, b.Start + Snap) ?? b.Start;
             double end;

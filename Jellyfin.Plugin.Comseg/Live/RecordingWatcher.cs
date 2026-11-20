@@ -308,17 +308,31 @@ public sealed class RecordingWatcher : BackgroundService
                     var workDir = _workspace.JobDir(run, "live", path);
                     var copy = new LiveCopy(_copies, _logger, path, Path.Combine(workDir, "copy.ts"), settings.LiveDetection ? ScaledCopy.Height(run) : 0);
                     job = new LiveJob(path, workDir, new LiveBreakTracker(run.ConfirmPasses, run.MinBreakSeconds), copy, settings);
+                    IReadOnlyList<StoredRecording>? stored = null;
                     if (settings.AudioEvidence)
                     {
-                        var stored = _audio.Load(settings.Record!.ChannelName, except: path);
+                        // The shadow must never keep a recording from its published analysis.
+                        try
+                        {
+                            stored = _audio.Load(settings.Record!.ChannelName, except: path);
+                        }
+                        catch (Exception ex) when (ex is not OperationCanceledException)
+                        {
+                            job.AudioError = "the channel's kept audio could not be read: " + ex.Message;
+                            _logger.LogWarning(ex, "Comseg: could not read the kept audio for {Path}; it runs without the audio shadow", path);
+                        }
+                    }
+
+                    if (stored is not null)
+                    {
                         job.Audio = new AudioShadow(stored);
                         if (job.Audio.Trusted)
                         {
-                            _logger.LogInformation("Comseg: listening to {Path} in shadow, against {Count} kept recordings of {Channel}, whose audio is trusted", path, stored.Count, settings.Record.ChannelName);
+                            _logger.LogInformation("Comseg: listening to {Path} in shadow, against {Count} kept recordings of {Channel}, whose audio is trusted", path, stored.Count, settings.Record!.ChannelName);
                         }
                         else
                         {
-                            _logger.LogInformation("Comseg: listening to {Path} in shadow, against {Count} kept recordings of {Channel}", path, stored.Count, settings.Record.ChannelName);
+                            _logger.LogInformation("Comseg: listening to {Path} in shadow, against {Count} kept recordings of {Channel}", path, stored.Count, settings.Record!.ChannelName);
                         }
                     }
 
@@ -663,10 +677,11 @@ public sealed class RecordingWatcher : BackgroundService
             }
 
             var from = Math.Max(0, audio.HeardItems - Fingerprint.ItemAt(5));
-            var items = await _fingerprinter.ExtractAsync(job.Path, Fingerprint.TimeOf(from), null, cancellationToken).ConfigureAwait(false);
+            // A minute is ample for a poll's worth of audio; past it ffmpeg is stopped and the poll goes on.
+            var items = await _fingerprinter.ExtractAsync(job.Path, Fingerprint.TimeOf(from), null, TimeSpan.FromMinutes(1), cancellationToken).ConfigureAwait(false);
             if (items is null)
             {
-                job.AudioError = "fingerprinting the recording failed";
+                job.AudioError = "fingerprinting the recording failed or ran out of time";
                 return;
             }
 

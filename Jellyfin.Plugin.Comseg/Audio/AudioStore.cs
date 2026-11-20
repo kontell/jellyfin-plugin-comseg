@@ -76,7 +76,11 @@ public sealed class AudioStore
         _logger = logger;
     }
 
-    /// <summary>A channel's folder name: its name in lower case, without accents, other characters as dashes.</summary>
+    /// <summary>
+    /// A channel's folder name: its name in lower case, without accents, other
+    /// characters as dashes, then a hash of the name, so names that read the
+    /// same that way (or not at all, as in another script) keep apart.
+    /// </summary>
     /// <param name="channel">The channel's name.</param>
     /// <returns>The folder name.</returns>
     public static string Key(string channel)
@@ -93,7 +97,8 @@ public sealed class AudioStore
         }
 
         var key = string.Join('-', builder.ToString().Split('-', StringSplitOptions.RemoveEmptyEntries));
-        return key.Length == 0 ? "channel" : key;
+        var hash = Workspace.Hash(channel.Trim().ToUpperInvariant())[..8];
+        return (key.Length == 0 ? "channel" : key) + "-" + hash;
     }
 
     /// <summary>Keeps a finished recording's fingerprint and breaks, replacing an earlier copy of the same recording, and drops what is too many or too old.</summary>
@@ -123,7 +128,7 @@ public sealed class AudioStore
     public IReadOnlyList<StoredRecording> Load(string channel, string? except = null)
     {
         var list = new List<StoredRecording>();
-        foreach (var (info, fp) in Entries(channel))
+        foreach (var (info, fp) in Entries(channel).Where(e => !Expired(e.Info)))
         {
             if (except is not null && string.Equals(info.Path, except, StringComparison.Ordinal))
             {
@@ -146,16 +151,15 @@ public sealed class AudioStore
     /// <summary>How many recordings a channel keeps now.</summary>
     /// <param name="channel">The channel's name.</param>
     /// <returns>The count.</returns>
-    public int Count(string channel) => Entries(channel).Count;
+    public int Count(string channel) => Entries(channel).Count(e => !Expired(e.Info));
 
     private void Prune(string channel)
     {
         var entries = Entries(channel);
-        var now = DateTime.UtcNow;
         for (var i = 0; i < entries.Count; i++)
         {
             var (info, fp) = entries[i];
-            if (i >= Keep || now - (info.StartUtc ?? info.AddedUtc) > MaxAge)
+            if (i >= Keep || Expired(info))
             {
                 File.Delete(fp);
                 File.Delete(Path.ChangeExtension(fp, ".json"));
@@ -163,22 +167,31 @@ public sealed class AudioStore
         }
     }
 
-    /// <summary>A channel's entries with readable metadata and a fingerprint file, newest first.</summary>
+    private static bool Expired(StoredRecordingInfo info) => DateTime.UtcNow - (info.StartUtc ?? info.AddedUtc) > MaxAge;
+
+    /// <summary>A channel's entries with readable metadata and a fingerprint file, newest first; none when the folder cannot be read.</summary>
     private List<(StoredRecordingInfo Info, string Fp)> Entries(string channel)
     {
         var dir = Folder(channel);
         var entries = new List<(StoredRecordingInfo, string)>();
-        if (!Directory.Exists(dir))
+        string[] files;
+        try
         {
+            files = Directory.Exists(dir) ? Directory.GetFiles(dir, "*.json") : [];
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogWarning("Comseg: could not read the kept audio of {Channel}: {Problem}", channel, ex.Message);
             return entries;
         }
 
-        foreach (var json in Directory.EnumerateFiles(dir, "*.json"))
+        foreach (var json in files)
         {
             var fp = Path.ChangeExtension(json, ".fp");
             try
             {
-                if (File.Exists(fp) && JsonSerializer.Deserialize<StoredRecordingInfo>(File.ReadAllText(json), Json) is { } info)
+                if (File.Exists(fp) && JsonSerializer.Deserialize<StoredRecordingInfo>(File.ReadAllText(json), Json) is { } info
+                    && string.Equals(info.Channel.Trim(), channel.Trim(), StringComparison.OrdinalIgnoreCase))
                 {
                     entries.Add((info, fp));
                 }
