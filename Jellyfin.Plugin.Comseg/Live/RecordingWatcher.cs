@@ -652,7 +652,7 @@ public sealed class RecordingWatcher : BackgroundService
             job.Item?.Name ?? Path.GetFileName(job.Path),
             breaks.Count == 0 ? "no breaks" : string.Join(", ", breaks.Select(b => string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0:0}-{1:0}", b.Start, b.End))));
         job.Tracker.Observe(breaks);
-        job.Audio?.Analysed(breaks, AnalysisStatus.Read(process.StatusPath));
+        job.Audio?.Analysed(breaks, AnalysisStatus.Read(process.StatusPath, job.Audio.Status));
     }
 
     /// <summary>
@@ -691,23 +691,30 @@ public sealed class RecordingWatcher : BackgroundService
             if (items is null)
             {
                 job.AudioError = "fingerprinting the recording failed or ran out of time";
-                return;
             }
-
-            job.AudioError = null;
-            if (items.Length > 0 && audio.Update(from, items, job.Settings.Config.MinBreakSeconds))
+            else
             {
-                _logger.LogInformation(
-                    job.PublishesAudio ? "Comseg: audio decision for {Name}: publishes {Shadow}; Comskip's analyses alone gave {Published}" : "Comseg: shadow of {Name}: would publish {Shadow}; published {Published}",
-                    job.Item?.Name ?? Path.GetFileName(job.Path),
-                    AudioShadow.Describe(audio.Rows),
-                    job.Tracker.Confirmed.Count == 0 ? "no breaks" : string.Join(", ", job.Tracker.Confirmed.Select(b => string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0:0}-{1:0}", b.Start, b.End))));
+                job.AudioError = null;
+                if (items.Length > 0)
+                {
+                    audio.Hear(from, items);
+                }
             }
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             job.AudioError = "listening failed: " + ex.Message;
             _logger.LogWarning(ex, "Comseg: listening to {Path} failed", job.Path);
+        }
+
+        // Decide every poll, heard or not: a new analysis reaches the rows even while fingerprinting fails.
+        if (job.Audio is not null && audio.Decide(job.Settings.Config.MinBreakSeconds))
+        {
+            _logger.LogInformation(
+                job.PublishesAudio ? "Comseg: audio decision for {Name}: publishes {Shadow}; Comskip's analyses alone gave {Published}" : "Comseg: shadow of {Name}: would publish {Shadow}; published {Published}",
+                job.Item?.Name ?? Path.GetFileName(job.Path),
+                AudioShadow.Describe(audio.Rows),
+                job.Tracker.Confirmed.Count == 0 ? "no breaks" : string.Join(", ", job.Tracker.Confirmed.Select(b => string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0:0}-{1:0}", b.Start, b.End))));
         }
     }
 

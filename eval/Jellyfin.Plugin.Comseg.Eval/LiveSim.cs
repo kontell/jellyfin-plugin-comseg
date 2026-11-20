@@ -30,7 +30,8 @@ public static class LiveSim
                 continue;
             }
 
-            list.Add(new Analysis(t, EdlParser.ReadFile(Path.Combine(folder, fields[1]))));
+            var edl = Path.Combine(folder, fields[1]);
+            list.Add(new Analysis(t, EdlParser.ReadFile(edl), Comskip.AnalysisStatus.Read(Path.ChangeExtension(edl, ".status"))));
         }
 
         return list.OrderBy(a => a.T).ToList();
@@ -77,5 +78,6 @@ public static class LiveSim
     /// <summary>One analysis by the live Comskip.</summary>
     /// <param name="T">The second of the recording at which it appeared.</param>
     /// <param name="Breaks">What it reported.</param>
-    public sealed record Analysis(double T, IReadOnlyList<Break> Breaks);
+    /// <param name="Status">The status the Comseg build wrote beside it (the EDL's name with .status), or null.</param>
+    public sealed record Analysis(double T, IReadOnlyList<Break> Breaks, Comskip.AnalysisStatus? Status = null);
 }

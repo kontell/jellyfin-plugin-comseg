@@ -21,18 +21,24 @@ public sealed record AnalysisStatus(double Seconds, string Logo, double LogoFrac
     /// <summary>Gets a value indicating whether the analysis was made without the channel logo, on the picture's other cues alone.</summary>
     public bool WithoutLogo => Logo is "none" or "disabled";
 
-    /// <summary>Reads a status file, or returns null when there is none or it cannot be read.</summary>
+    /// <summary>
+    /// Reads a status file. None there means a build that does not write one:
+    /// null. One there that cannot be read or makes no sense gives the last
+    /// status known instead, so that a failed read does not lift what the last
+    /// one said.
+    /// </summary>
     /// <param name="path">The file.</param>
+    /// <param name="last">The last status read, or null.</param>
     /// <returns>The status.</returns>
-    public static AnalysisStatus? Read(string path)
+    public static AnalysisStatus? Read(string path, AnalysisStatus? last = null)
     {
         try
         {
-            return File.Exists(path) ? Parse(File.ReadAllText(path)) : null;
+            return File.Exists(path) ? Parse(File.ReadAllText(path)) ?? last : null;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            return null;
+            return last;
         }
     }
 

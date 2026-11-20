@@ -40,7 +40,17 @@ public sealed class AudioShadow
     public int HeardItems => Fingerprint.ItemAt(Listener.Heard);
 
     /// <summary>Gets a value indicating whether Comskip-only breaks wait for the final pass: the channel's audio is trusted, or the latest analysis was made without the channel logo while the channel has audio history to go by.</summary>
-    public bool HoldsBackComskip => Trusted || (_status?.WithoutLogo == true && Listener.StoredCount > 0);
+    public bool HoldsBackComskip => HoldsBack(Trusted, _status, Listener.StoredCount);
+
+    /// <summary>Gets what the Comseg build said about the latest analysis, or null.</summary>
+    public AnalysisStatus? Status => _status;
+
+    /// <summary>Whether Comskip-only breaks wait for the final pass: on a trusted channel, or after an analysis made without the logo on a channel with audio history.</summary>
+    /// <param name="trusted">Whether the channel's audio is trusted.</param>
+    /// <param name="status">What the Comseg build said about the latest analysis, or null.</param>
+    /// <param name="stored">How many of the channel's recordings are kept.</param>
+    /// <returns>True when they wait.</returns>
+    public static bool HoldsBack(bool trusted, AnalysisStatus? status, int stored) => trusted || (status?.WithoutLogo == true && stored > 0);
 
     /// <summary>Notes a new analysis from the live Comskip.</summary>
     /// <param name="breaks">Its breaks.</param>
@@ -52,18 +62,23 @@ public sealed class AudioShadow
         _status = status;
     }
 
-    /// <summary>Hears the newest audio, searches it and decides again.</summary>
+    /// <summary>Hears the newest audio and searches it.</summary>
     /// <param name="from">The item the new audio starts at.</param>
     /// <param name="items">The new audio.</param>
-    /// <param name="minBreak">The shortest break published.</param>
-    /// <returns>True when the rows changed.</returns>
-    public bool Update(int from, ReadOnlySpan<uint> items, double minBreak)
+    public void Hear(int from, ReadOnlySpan<uint> items)
     {
         Listener.Hear(from, items);
 
         // Its own breaks so far, less any still open, say what its repeats are.
         var heard = Listener.Heard;
         Listener.Search(Rows.Select(r => r.Break).Where(b => b.End < heard - 30).ToList());
+    }
+
+    /// <summary>Decides the rows again from the latest analyses and the evidence so far, whether or not new audio was heard.</summary>
+    /// <param name="minBreak">The shortest break published.</param>
+    /// <returns>True when the rows changed.</returns>
+    public bool Decide(double minBreak)
+    {
         var rows = ShadowDecision.Decide(_latest, _previous, Listener.Evidence, minBreak, HoldsBackComskip, Listener.Heard);
         if (rows.SequenceEqual(Rows))
         {
