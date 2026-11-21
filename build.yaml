@@ -6,7 +6,7 @@ guid: "96262b59-95a6-4283-913c-e20e0967b35c"
 # version tracks the Jellyfin ABI it is built against: <server major.minor>.0.<build>.
 # The authority is the csproj's PluginVersion; this value is documentation and
 # is asserted against it at release time.
-version: "12.0.0.5"
+version: "12.0.0.6"
 targetAbi: "12.0.0.0"
 framework: "net10.0"
 owner: "kontell"
@@ -18,20 +18,9 @@ imageUrl: "https://raw.githubusercontent.com/kontell/jellyfin-plugin-comseg/main
 artifacts:
   - "Jellyfin.Plugin.Comseg.dll"
 changelog: |-
-  - Channel profiles: Comskip settings, analysis height, live detection
-    and audio evidence for the channels a profile names.
-  - Audio evidence, in shadow: the plugin keeps each finished recording's
-    audio fingerprint and breaks for its channel, and listens to
-    recordings in progress for adverts, promos and sponsor clips heard
-    before. The status page and the log show what it would publish;
-    nothing published changes unless a profile turns it on.
-  - Publish from audio evidence, per channel profile and off by default:
-    on channels whose adverts repeat, a break reaches clients seconds
-    after it starts instead of minutes, and its end no longer runs into
-    the programme while the break is still on air.
-  - Catchup: a client can save a programme that has already aired from
-    the IPTV provider's archive into the recordings; its breaks are
-    found as for a recording.
-  - With the Comseg build of Comskip from its current comseg branch, an
-    analysis made without the channel logo is noticed, and its breaks
-    wait for the final pass on channels with audio history.
+  - Audio evidence: a break that opened on a sponsor clip heard before
+    now also covers adverts the channel has not aired before, up to
+    three minutes past the last one recognised, until its closing clip.
+    New seasonal adverts no longer leave a break's rows short or split.
+  - An advert the audio missed no longer counts as programme when it
+    airs again later in the same recording.
