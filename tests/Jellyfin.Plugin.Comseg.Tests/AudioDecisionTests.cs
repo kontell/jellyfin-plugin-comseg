@@ -276,4 +276,64 @@ public class AudioDecisionTests
         Assert.True(shadow.Decide(20));
         Assert.Equal(new Break(500, 600), shadow.Rows.Single().Break);
     }
+
+    [Fact]
+    public void ABreakOpenedByAnEdgeClipBridgesAdvertsNotHeardBefore()
+    {
+        // Opened by its sponsor clip, two minutes of adverts not heard before, then its closing clip.
+        var edged = ShadowDecision.Decide(null, null, Evidence([Advert(100, 130), Advert(150, 180), Advert(300, 320)], [new AudioEdge(98, true), new AudioEdge(322, false)]), 20);
+        Assert.Equal([new DecidedRow(new Break(98, 322), RowSource.Audio)], edged);
+
+        // The same gap without an edge clip at the start: two breaks.
+        var plain = ShadowDecision.Decide(null, null, Evidence([Advert(100, 130), Advert(150, 180), Advert(300, 320), Advert(330, 345)]), 20);
+        Assert.Equal([new Break(100, 180), new Break(300, 345)], plain.Select(r => r.Break));
+    }
+
+    [Fact]
+    public void NoBridgeCrossesProgrammeAudioOrMakesABreakOverSixMinutes()
+    {
+        var programme = ShadowDecision.Decide(null, null, Evidence([Advert(100, 130), Advert(150, 180), new AudioSpan(220, 232, AudioKind.Programme), Advert(300, 320)], [new AudioEdge(98, true), new AudioEdge(322, false)]), 20);
+        Assert.Equal([new Break(98, 180), new Break(300, 320)], programme.Select(r => r.Break));
+
+        var tooLong = ShadowDecision.Decide(null, null, Evidence([Advert(100, 130), Advert(150, 200), Advert(250, 300), Advert(450, 470)], [new AudioEdge(98, true), new AudioEdge(472, false)]), 20);
+        Assert.Equal([new Break(98, 300), new Break(450, 470)], tooLong.Select(r => r.Break));
+    }
+
+    [Fact]
+    public void ABreakThatClosedOnAnEdgeClipBridgesNothing()
+    {
+        // One bumper opens and closes every break, as on Sky: the first break closes at 230 s, and the
+        // next opens 150 s later on the same clip, which so also carries end edges.
+        AudioEdge[] edges = [new(98, true), new(103, false), new(230, false), new(378, true), new(382, false), new(385, false)];
+        var rows = ShadowDecision.Decide(null, null, Evidence([Advert(100, 110), Advert(130, 228), Advert(380, 390), Advert(400, 460)], edges), 20);
+        Assert.Equal([new Break(98, 230), new Break(378, 460)], rows.Select(r => r.Break));
+    }
+
+    [Fact]
+    public void ARepeatOfAudioFirstHeardInAComskipBreakIsNotProgramme()
+    {
+        // Audio first aired at 400 s, which the rows left out, airs again at 1000 s.
+        var live = AudioMatchTests.Noise(Fingerprint.ItemAt(1200), 31);
+        live.AsSpan(Fingerprint.ItemAt(400), Fingerprint.ItemAt(30)).CopyTo(live.AsSpan(Fingerprint.ItemAt(1000)));
+        Break[] rows = [new(100, 150)];
+
+        AudioEvidence Hear(IReadOnlyList<Break>? unsure)
+        {
+            var listener = new AudioListener([]);
+            var heard = 0;
+            foreach (var t in new[] { 600.0, 900, 1020, 1040, 1100 })
+            {
+                var to = Fingerprint.ItemAt(t);
+                listener.Hear(heard, live.AsSpan(heard, to - heard));
+                heard = to;
+                listener.Search(rows, unsure);
+            }
+
+            return listener.Evidence;
+        }
+
+        var programme = Assert.Single(Hear(null).Programme);
+        Assert.InRange(programme.Start, 999, 1001);
+        Assert.Empty(Hear([new Break(390, 450)]).Programme);
+    }
 }

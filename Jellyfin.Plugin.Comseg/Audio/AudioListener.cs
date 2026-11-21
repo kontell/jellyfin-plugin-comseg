@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Jellyfin.Plugin.Comseg.Edl;
 
 namespace Jellyfin.Plugin.Comseg.Audio;
@@ -60,7 +61,8 @@ public sealed class AudioListener
 
     /// <summary>Searches what has been heard since the last search.</summary>
     /// <param name="ownBreaks">The recording's own breaks so far, which label its repeats.</param>
-    public void Search(IReadOnlyList<Break> ownBreaks)
+    /// <param name="unsure">Stretches of the recording that may be breaks though they are not in <paramref name="ownBreaks"/>, Comskip's say: a repeat of audio first heard in one is not programme evidence.</param>
+    public void Search(IReadOnlyList<Break> ownBreaks, IReadOnlyList<Break>? unsure = null)
     {
         var all = _items.ToArray();
         var from = Math.Max(0, _searched - Fingerprint.ItemAt(Overlap));
@@ -74,7 +76,7 @@ public sealed class AudioListener
         var edges = new List<AudioEdge>();
         foreach (var stored in _stored)
         {
-            Collect(Matcher.Match(stored.Items, stored.Index, window), from, stored.Info.Breaks, spans, edges);
+            Collect(Matcher.Match(stored.Items, stored.Index, window), from, stored.Info.Breaks, [], spans, edges);
         }
 
         // The recording's own audio up to SelfGap before this window.
@@ -87,23 +89,21 @@ public sealed class AudioListener
             }
 
             var ownLength = _ownIndex.Length;
-            Collect(Matcher.Match(all.AsSpan(0, ownLength), _ownIndex, window), from, ownBreaks, spans, edges);
+            Collect(Matcher.Match(all.AsSpan(0, ownLength), _ownIndex, window), from, ownBreaks, unsure ?? [], spans, edges);
         }
 
         Evidence.Add(spans, edges);
         _searched = all.Length;
     }
 
-    private static void Collect(IReadOnlyList<MatchRun> runs, int from, IReadOnlyList<Break> breaks, List<AudioSpan> spans, List<AudioEdge> edges)
+    private static void Collect(IReadOnlyList<MatchRun> runs, int from, IReadOnlyList<Break> breaks, IReadOnlyList<Break> unsure, List<AudioSpan> spans, List<AudioEdge> edges)
     {
         foreach (var run in runs)
         {
-            var (span, found) = AudioLabels.Label(
-                Fingerprint.TimeOf(from + run.BStart),
-                Fingerprint.TimeOf(run.AStart),
-                run.Length * Fingerprint.Hop,
-                breaks);
-            if (span is { } s)
+            var at = Fingerprint.TimeOf(run.AStart);
+            var length = run.Length * Fingerprint.Hop;
+            var (span, found) = AudioLabels.Label(Fingerprint.TimeOf(from + run.BStart), at, length, breaks);
+            if (span is { } s && !(s.Kind == AudioKind.Programme && unsure.Any(u => u.Start < at + length && at < u.End)))
             {
                 spans.Add(s);
             }

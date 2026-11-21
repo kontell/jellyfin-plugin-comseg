@@ -69,9 +69,10 @@ public sealed class AudioShadow
     {
         Listener.Hear(from, items);
 
-        // Its own breaks so far, less any still open, say what its repeats are.
+        // Its own breaks so far, less any still open, say what its repeats are. Audio first heard
+        // where Comskip saw a break the rows left out is no evidence of programme either way.
         var heard = Listener.Heard;
-        Listener.Search(Rows.Select(r => r.Break).Where(b => b.End < heard - 30).ToList());
+        Listener.Search(Rows.Select(r => r.Break).Where(b => b.End < heard - 30).ToList(), _latest);
     }
 
     /// <summary>Decides the rows again from the latest analyses and the evidence so far, whether or not new audio was heard.</summary>
