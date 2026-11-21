@@ -195,22 +195,33 @@ public static class ShadowDecision
 
     private static bool Joins(List<AudioSpan> group, AudioSpan span, IReadOnlyList<AudioEdge> edges, IReadOnlyList<AudioSpan> programme)
     {
-        var gap = span.Start - group[^1].End;
+        var last = group[^1];
+        var gap = span.Start - last.End;
         if (gap <= Gap)
         {
             return true;
         }
 
+        if (gap > Bridge || !OpensOnEdgeClip(group[0], edges))
+        {
+            return false;
+        }
+
+        // The break as it would be published: from its implied start to the end edge the new stretch implies.
+        var start = Nearest(edges, true, group[0].Start, group[0].Start - Gap, group[0].Start + 5) ?? group[0].Start;
+        var end = Nearest(edges, false, span.End, span.End - 5, span.End + 30) ?? span.End;
+
         // Closed: an end edge at the last advert heard, past the opening clip, whose own old role may
         // put end edges at the very start. Where one bumper opens and closes every break, as on Sky,
-        // the next break's opening clip must not reach back across the programme between.
-        var last = group[^1];
-        var closed = edges.Any(e => !e.IsStart && e.At >= last.End - 5 && e.At <= last.End + AudioLabels.EdgeReach + 1 && e.At - group[0].Start >= MinClosed);
-        return gap <= Bridge
-            && !closed
-            && span.End - group[0].Start <= MaxBreak
-            && OpensOnEdgeClip(group[0], edges)
-            && !programme.Any(p => p.End - p.Start >= ProgrammeCut && p.Start < span.Start && p.End > last.End);
+        // the next break's opening clip must not reach back across the programme between. An end
+        // edge with more adverts after it, within a minute, closed nothing: an advert that ended a
+        // stored break may sit mid-break here.
+        var closed = edges.Any(e => !e.IsStart && e.At >= last.End - 5 && e.At <= last.End + AudioLabels.EdgeReach + 1 && e.At - start >= MinClosed);
+
+        // Programme audio anywhere since the opening clip: what follows it did not open on that clip.
+        return !closed
+            && end - start <= MaxBreak
+            && !programme.Any(p => p.End - p.Start >= ProgrammeCut && p.Start < span.Start && p.End > group[0].Start);
     }
 
     /// <summary>The implied edge of a kind nearest a time, within a range.</summary>
