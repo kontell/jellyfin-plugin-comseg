@@ -310,6 +310,33 @@ public class AudioDecisionTests
     }
 
     [Fact]
+    public void ABridgeIsMeasuredFromTheBreaksImpliedEdges()
+    {
+        // The close at 125 is 35 s after the break's implied start at 90, though 25 s after its first advert.
+        var closed = ShadowDecision.Decide(null, null, Evidence([Advert(100, 125), Advert(250, 275)], [new AudioEdge(90, true), new AudioEdge(125, false), new AudioEdge(277, false)]), 20);
+        Assert.Equal([new Break(90, 125), new Break(250, 275)], closed.Select(r => r.Break));
+
+        // From the implied start at 40 to the implied end at 452 is over six minutes.
+        var tooLong = ShadowDecision.Decide(null, null, Evidence([Advert(100, 130), Advert(250, 280), Advert(430, 450)], [new AudioEdge(40, true), new AudioEdge(452, false)]), 20);
+        Assert.Equal([new Break(40, 280), new Break(430, 450)], tooLong.Select(r => r.Break));
+    }
+
+    [Fact]
+    public void ProgrammeAudioSinceTheOpeningClipStopsABridge()
+    {
+        var rows = ShadowDecision.Decide(null, null, Evidence([Advert(100, 130), new AudioSpan(140, 150, AudioKind.Programme), Advert(160, 180), Advert(300, 320)], [new AudioEdge(98, true), new AudioEdge(322, false)]), 20);
+        Assert.Equal([new Break(98, 140), new Break(150, 180), new Break(300, 320)], rows.Select(r => r.Break));
+    }
+
+    [Fact]
+    public void AnEndEdgeWithMoreAdvertsAfterItClosesNothing()
+    {
+        // An advert that ended a stored break, mid-break here: adverts follow within a minute, then new ones.
+        var rows = ShadowDecision.Decide(null, null, Evidence([Advert(100, 130), Advert(150, 180), Advert(230, 250), Advert(400, 420)], [new AudioEdge(98, true), new AudioEdge(182, false), new AudioEdge(422, false)]), 20);
+        Assert.Equal([new Break(98, 422)], rows.Select(r => r.Break));
+    }
+
+    [Fact]
     public void ARepeatOfAudioFirstHeardInAComskipBreakIsNotProgramme()
     {
         // Audio first aired at 400 s, which the rows left out, airs again at 1000 s.
