@@ -90,11 +90,13 @@ internal static class AudioCommands
             listener.Hear(heardTo, items.AsSpan(heardTo, to - heardTo));
             heardTo = to;
 
-            // Its own breaks so far label its repeats: the rows shown, less any still open.
-            listener.Search(shown.Where(b => b.End < now - 30).ToList());
             var seen = analyses.Where(a => a.T <= now).ToList();
             var latest = seen.Count > 0 ? seen[^1].Breaks : null;
             var previous = seen.Count > 1 ? seen[^2].Breaks : null;
+
+            // Its own breaks so far label its repeats, as AudioShadow.Hear does: the rows shown, less
+            // any still open; audio first heard in a Comskip break the rows left out is not programme.
+            listener.Search(shown.Where(b => b.End < now - 30).ToList(), latest);
             var hold = AudioShadow.HoldsBack(trust, seen.Count > 0 ? seen[^1].Status : null, store.Count);
             var rows = ShadowDecision.Decide(latest, previous, listener.Evidence, minBreak, hold, now).Select(r => r.Break).ToList();
             if (!rows.SequenceEqual(shown))

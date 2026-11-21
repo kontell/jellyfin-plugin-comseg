@@ -35,6 +35,13 @@ public readonly record struct DecidedRow(Break Break, RowSource Source);
 /// programme it sells. Its start is the implied edge, else the first advert;
 /// its end the implied end edge, else the last advert heard.
 ///
+/// Advert stretches within a minute of each other belong to one break, and so
+/// does what lies between them. A break that opened on an edge clip and has
+/// not yet closed on one also takes in a stretch up to three minutes after
+/// the last, as long as no programme audio lies between and the break stays
+/// under six minutes: adverts first aired since the stored recordings fill a
+/// break's middle and end.
+///
 /// A Comskip break whose end is still growing (the end moved on by more than
 /// 20 s since the analysis before) reaches only as far as the previous
 /// analysis's end, which this one confirms, or the last advert heard in it,
@@ -57,6 +64,18 @@ public static class ShadowDecision
     /// <summary>How far an implied edge may move a Comskip edge.</summary>
     public const double Snap = 20;
 
+    /// <summary>The longest gap between advert stretches that a break opened by an edge clip still bridges.</summary>
+    public const double Bridge = 180;
+
+    /// <summary>The longest break a bridge may make.</summary>
+    public const double MaxBreak = 360;
+
+    /// <summary>How far into a break an end edge must be to close it rather than echo its opening clip.</summary>
+    public const double MinClosed = 30;
+
+    /// <summary>Programme audio at least this long is trusted: it cuts a row, and no bridge crosses it.</summary>
+    public const double ProgrammeCut = 8;
+
     /// <summary>Decides the rows.</summary>
     /// <param name="latest">Comskip's latest analysis, or null when there is none (audio alone).</param>
     /// <param name="previous">The analysis before it, or null.</param>
@@ -75,14 +94,12 @@ public static class ShadowDecision
         var known = new List<(bool Start, bool End)>();
 
         // Breaks the audio alone shows.
-        foreach (var group in Groups(adverts))
+        foreach (var group in Groups(adverts, edges, audio.Programme))
         {
             var first = group[0];
             var last = group[^1];
             var start = Nearest(edges, true, first.Start, first.Start - Gap, first.Start + 5);
-            // An edge clip opens a break whichever edge it marked before: sponsors swap
-            // ends between broadcasts, so a clip that closed the stored breaks can open this one.
-            var edgeClip = start is not null || edges.Any(e => !e.IsStart && e.At >= first.Start && e.At <= first.End + AudioLabels.EdgeReach + 1);
+            var edgeClip = OpensOnEdgeClip(first, edges);
             if (audio.AdvertMatchesIn(first.Start, last.End) < 2 && !edgeClip)
             {
                 continue;
@@ -152,13 +169,18 @@ public static class ShadowDecision
         return new DecidedRow(b, source);
     }
 
-    /// <summary>Advert stretches grouped by the gap between them.</summary>
-    private static List<List<AudioSpan>> Groups(IReadOnlyList<AudioSpan> adverts)
+    /// <summary>Whether a break's first advert stretch is an edge clip, whichever edge it marked before: sponsors swap ends between broadcasts, so a clip that closed the stored breaks can open this one.</summary>
+    private static bool OpensOnEdgeClip(AudioSpan first, IReadOnlyList<AudioEdge> edges) =>
+        Nearest(edges, true, first.Start, first.Start - Gap, first.Start + 5) is not null
+        || edges.Any(e => !e.IsStart && e.At >= first.Start && e.At <= first.End + AudioLabels.EdgeReach + 1);
+
+    /// <summary>Advert stretches grouped into breaks: by a gap of up to a minute, or of up to <see cref="Bridge"/> in a break that opened on an edge clip, with no programme audio between.</summary>
+    private static List<List<AudioSpan>> Groups(IReadOnlyList<AudioSpan> adverts, IReadOnlyList<AudioEdge> edges, IReadOnlyList<AudioSpan> programme)
     {
         var groups = new List<List<AudioSpan>>();
         foreach (var span in adverts)
         {
-            if (groups.Count > 0 && span.Start - groups[^1][^1].End <= Gap)
+            if (groups.Count > 0 && Joins(groups[^1], span, edges, programme))
             {
                 groups[^1].Add(span);
             }
@@ -169,6 +191,26 @@ public static class ShadowDecision
         }
 
         return groups;
+    }
+
+    private static bool Joins(List<AudioSpan> group, AudioSpan span, IReadOnlyList<AudioEdge> edges, IReadOnlyList<AudioSpan> programme)
+    {
+        var gap = span.Start - group[^1].End;
+        if (gap <= Gap)
+        {
+            return true;
+        }
+
+        // Closed: an end edge at the last advert heard, past the opening clip, whose own old role may
+        // put end edges at the very start. Where one bumper opens and closes every break, as on Sky,
+        // the next break's opening clip must not reach back across the programme between.
+        var last = group[^1];
+        var closed = edges.Any(e => !e.IsStart && e.At >= last.End - 5 && e.At <= last.End + AudioLabels.EdgeReach + 1 && e.At - group[0].Start >= MinClosed);
+        return gap <= Bridge
+            && !closed
+            && span.End - group[0].Start <= MaxBreak
+            && OpensOnEdgeClip(group[0], edges)
+            && !programme.Any(p => p.End - p.Start >= ProgrammeCut && p.Start < span.Start && p.End > last.End);
     }
 
     /// <summary>The implied edge of a kind nearest a time, within a range.</summary>
@@ -212,7 +254,7 @@ public static class ShadowDecision
         foreach (var row in rows)
         {
             var pieces = new List<Break> { row.Break };
-            foreach (var p in programme.Where(p => p.End - p.Start >= 8))
+            foreach (var p in programme.Where(p => p.End - p.Start >= ProgrammeCut))
             {
                 pieces = pieces.SelectMany(b => p.End <= b.Start || p.Start >= b.End
                     ? new[] { b }
