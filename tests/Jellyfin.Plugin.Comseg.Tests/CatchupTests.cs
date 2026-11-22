@@ -29,7 +29,7 @@ public class CatchupTests
     {
         var entries = Archive.ParsePlaylist(Playlist);
         Assert.Equal(5, entries.Count);
-        Assert.Equal(new PlaylistEntry("ITV 1", "101", 7, "http://tv.example/ch0001/index.m3u8?token=a"), entries[0]);
+        Assert.Equal(new PlaylistEntry("ITV 1", "101", 7, "http://tv.example/ch0001/index.m3u8?token=a", "Entertainment"), entries[0]);
         Assert.Equal("ITV 4", entries[1].Name);
         Assert.Equal("http://tv.example/ch0002/mono.m3u8?token=b", entries[1].Url);
 

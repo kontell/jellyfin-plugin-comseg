@@ -4,6 +4,7 @@ using System.Linq;
 using System.Net.Mime;
 using System.Threading;
 using System.Threading.Tasks;
+using Jellyfin.Plugin.Comseg.Catchup;
 using Jellyfin.Plugin.Comseg.Comskip;
 using Jellyfin.Plugin.Comseg.Live;
 using Jellyfin.Plugin.Comseg.Profiles;
@@ -27,6 +28,7 @@ public class ComsegController : ControllerBase
     private readonly OnDemandDetection _detection;
     private readonly ILibraryManager _library;
     private readonly RecordingRecords _records;
+    private readonly TunerPlaylists _playlists;
 
     /// <summary>Initializes a new instance of the <see cref="ComsegController"/> class.</summary>
     /// <param name="watcher">The watcher.</param>
@@ -34,18 +36,21 @@ public class ComsegController : ControllerBase
     /// <param name="detection">The on-demand full pass.</param>
     /// <param name="library">The library manager.</param>
     /// <param name="records">The recording records.</param>
+    /// <param name="playlists">The tuners' playlists, for a channel's groups.</param>
     public ComsegController(
         RecordingWatcher watcher,
         ComskipRunner runner,
         OnDemandDetection detection,
         ILibraryManager library,
-        RecordingRecords records)
+        RecordingRecords records,
+        TunerPlaylists playlists)
     {
         _watcher = watcher;
         _runner = runner;
         _detection = detection;
         _library = library;
         _records = records;
+        _playlists = playlists;
     }
 
     /// <summary>The live jobs and the configured binary.</summary>
@@ -117,16 +122,18 @@ public class ComsegController : ControllerBase
     /// <summary>
     /// Sets the channel a recording came from, for one the plugin did not see
     /// record (an older recording, or one in an extra folder); an empty name
-    /// forgets it. Later passes use the matching profile; Detect runs one now.
+    /// forgets it. The channel's groups are read from the tuners' playlists.
+    /// Later passes use the matching profile; Detect runs one now.
     /// </summary>
     /// <param name="itemId">The item.</param>
     /// <param name="request">The channel.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The settings the recording now runs with.</returns>
     [HttpPost("Recording/{itemId}/Channel")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status500InternalServerError)]
-    public ActionResult<RecordingResponse> SetChannel([FromRoute] Guid itemId, [FromBody] ChannelRequest request)
+    public async Task<ActionResult<RecordingResponse>> SetChannel([FromRoute] Guid itemId, [FromBody] ChannelRequest request, CancellationToken cancellationToken)
     {
         var item = _library.GetItemById(itemId);
         if (item is null || string.IsNullOrEmpty(item.Path))
@@ -135,9 +142,18 @@ public class ComsegController : ControllerBase
         }
 
         var old = _records.Get(item.Path);
-        var written = string.IsNullOrWhiteSpace(request.ChannelName)
-            ? _records.Delete(item.Path)
-            : _records.Save(new RecordingRecord(item.Path, request.ChannelName.Trim(), null, old?.Programme ?? item.Name, old?.StartUtc, "admin"));
+        bool written;
+        if (string.IsNullOrWhiteSpace(request.ChannelName))
+        {
+            written = _records.Delete(item.Path);
+        }
+        else
+        {
+            var name = request.ChannelName.Trim();
+            var groups = await _playlists.GroupsAsync(name, cancellationToken).ConfigureAwait(false);
+            written = _records.Save(new RecordingRecord(item.Path, name, null, old?.Programme ?? item.Name, old?.StartUtc, "admin", groups));
+        }
+
         if (!written)
         {
             return Problem("the recording's record could not be written; see the server log", statusCode: StatusCodes.Status500InternalServerError);
@@ -155,6 +171,7 @@ public class ComsegController : ControllerBase
             Path = path,
             Channel = settings.Record?.ChannelName,
             ChannelSource = settings.Record?.Source,
+            ChannelGroups = settings.Record?.ChannelGroups,
             Profile = settings.ProfileName,
             IniKeys = settings.Keys,
             AnalysisHeight = ScaledCopy.Height(settings.Config),
@@ -273,6 +290,9 @@ public class ComsegController : ControllerBase
 
         /// <summary>Gets or sets who set the channel: "timer", "catchup" or "admin".</summary>
         public string? ChannelSource { get; set; }
+
+        /// <summary>Gets or sets the channel's groups in the tuner's playlist, or null when they are not known.</summary>
+        public IReadOnlyList<string>? ChannelGroups { get; set; }
 
         /// <summary>Gets or sets the profile that applies, or null for the plugin's own settings.</summary>
         public string? Profile { get; set; }

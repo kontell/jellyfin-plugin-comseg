@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 
 namespace Jellyfin.Plugin.Comseg.Profiles;
 
@@ -14,10 +15,12 @@ namespace Jellyfin.Plugin.Comseg.Profiles;
 /// <param name="Programme">The programme's name, when known.</param>
 /// <param name="StartUtc">When the programme started, when known.</param>
 /// <param name="Source">Who wrote it: "timer", "catchup" or "admin".</param>
+/// <param name="ChannelGroups">The channel's groups in the tuner's playlist when it was written down, or null when they could not be read (or the record is older than them).</param>
 public sealed record RecordingRecord(
     string Path,
     string ChannelName,
     string? ChannelId,
     string? Programme,
     DateTime? StartUtc,
-    string Source);
+    string Source,
+    IReadOnlyList<string>? ChannelGroups = null);

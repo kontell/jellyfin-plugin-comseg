@@ -11,7 +11,16 @@ namespace Jellyfin.Plugin.Comseg.Catchup;
 /// <param name="Number">The channel number, when the entry carries one.</param>
 /// <param name="ArchiveDays">Days of archive from catchup-days, timeshift or tvg-rec, when the entry says.</param>
 /// <param name="Url">The live URL. It carries the account's token: never log it.</param>
-public sealed record PlaylistEntry(string Name, string? Number, int? ArchiveDays, string Url);
+/// <param name="GroupTitle">The entry's group-title, when it has one.</param>
+public sealed record PlaylistEntry(string Name, string? Number, int? ArchiveDays, string Url, string? GroupTitle = null)
+{
+    /// <summary>
+    /// Gets the groups the channel is in: the group-title split at semicolons,
+    /// as Kodi's IPTV Simple client reads it, so "Sport;Sky Sports" is in
+    /// "Sport" and in "Sky Sports".
+    /// </summary>
+    public IReadOnlyList<string> Groups => (GroupTitle ?? string.Empty).Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+}
 
 /// <summary>What a check of an archive playlist found.</summary>
 /// <param name="Problems">Why the playlist cannot be downloaded; empty when it can.</param>
@@ -68,7 +77,7 @@ public static class Archive
             var name = ChannelName(extInf, attributes);
             if (name is not null)
             {
-                entries.Add(new PlaylistEntry(name, ChannelNumber(extInf, attributes), ArchiveDays(attributes), line));
+                entries.Add(new PlaylistEntry(name, ChannelNumber(extInf, attributes), ArchiveDays(attributes), line, attributes.GetValueOrDefault("group-title")));
             }
 
             extInf = null;

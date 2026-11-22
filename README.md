@@ -35,13 +35,14 @@ Jellyfin's own per-library setting *Disabled media segment providers* turns the 
 
 ## Channel profiles
 
-Channels differ: where the logo sits, what the provider burns into the picture, whether live analysis is worth its cost. A channel profile changes the settings for the recordings of the channels it lists, under *Channel profiles* on the settings page.
+Channels differ: where the logo sits, what the provider burns into the picture, whether live analysis is worth its cost. A channel profile changes the settings for the recordings of the channels it lists, by name or by their groups in the tuner's playlist, under *Channel profiles* on the settings page.
 
-A finished Jellyfin recording does not say which channel it came from, so the plugin notes the channel from the recording's timer when it starts recording, and from the request for a catchup download. Every later pass over the file, the final one, the Media Segment Scan's or one asked for, uses the profile of that channel. The first profile that lists the channel applies; a recording that no profile lists, or whose channel the plugin never saw, runs with the settings above. For recordings made before the plugin noted channels, an admin can set the channel through the API below.
+A finished Jellyfin recording does not say which channel it came from, so the plugin notes the channel from the recording's timer when it starts recording, and from the request for a catchup download, together with the channel's groups in the M3U tuner's playlist. Every later pass over the file, the final one, the Media Segment Scan's or one asked for, uses the profile of that channel. The first profile that lists the channel or one of its groups applies; a recording that no profile lists, or whose channel the plugin never saw, runs with the settings above. For recordings made before the plugin noted channels, an admin can set the channel through the API below.
 
 | Profile setting | |
 | --- | --- |
 | Channels | Channel names as Jellyfin shows them, separated by semicolons. Case and accents are ignored, so `RTÉ One` also matches a channel the playlist calls `RTE One`, and `*` matches any text, as in `Sky Sports*`. |
+| Playlist groups | Groups from the M3U tuner's playlist, separated by semicolons and matched as channel names are. A channel's groups are its `group-title` split at semicolons, as Kodi's IPTV Simple client reads it, so `group-title="Sport;Sky Sports"` puts a channel in `Sport` and in `Sky Sports`. A channel in any of the groups uses the profile, as does a channel listed by name. Recordings noted before this setting existed, or while the playlist could not be read, go by the name alone; setting the channel through the API below reads the groups again. |
 | Comskip ini keys | `key=value` pairs separated by semicolons, laid over the base ini for these channels. The run-mode keys the plugin sets are applied after them and win; *Check Comskip* lists any key a profile sets that is left out for that reason. |
 | Analysis height | Overrides the setting above for these channels; empty uses it. |
 | Detect while recording | Off: these recordings get only the full pass, once they finish. |
@@ -90,7 +91,7 @@ These need permission to manage live TV recordings. The request body is `Channel
 GET  /Comseg/Status          live jobs and the configured binary
 POST /Comseg/Check           run the configured Comskip with --help
 POST /Comseg/Detect/{itemId} queue a full pass over a finished recording (202)
-GET  /Comseg/Recording/{itemId}          the recording's channel, profile and the settings its passes use
+GET  /Comseg/Recording/{itemId}          the recording's channel, its playlist groups, its profile and the settings its passes use
 POST /Comseg/Recording/{itemId}/Channel  set the recording's channel: {"ChannelName": "RTE One"}; empty forgets it
 ```
 

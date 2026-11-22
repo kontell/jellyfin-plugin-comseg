@@ -72,6 +72,7 @@ public sealed class CatchupQueue : BackgroundService
     private readonly RecordingPaths _paths;
     private readonly OnDemandDetection _detection;
     private readonly RecordingRecords _records;
+    private readonly TunerPlaylists _playlists;
     private readonly ILogger<CatchupQueue> _logger;
     private readonly Channel<CatchupJob> _queue = Channel.CreateUnbounded<CatchupJob>();
     private readonly ConcurrentDictionary<Guid, CatchupJob> _jobs = new();
@@ -89,6 +90,7 @@ public sealed class CatchupQueue : BackgroundService
     /// <param name="paths">The recording paths.</param>
     /// <param name="detection">The full pass.</param>
     /// <param name="records">The recording records, where the programme's channel is written down.</param>
+    /// <param name="playlists">The tuners' playlists, where the channel is found.</param>
     /// <param name="logger">The logger.</param>
     public CatchupQueue(
         ILiveTvManager liveTv,
@@ -102,6 +104,7 @@ public sealed class CatchupQueue : BackgroundService
         RecordingPaths paths,
         OnDemandDetection detection,
         RecordingRecords records,
+        TunerPlaylists playlists,
         ILogger<CatchupQueue> logger)
     {
         _liveTv = liveTv;
@@ -115,6 +118,7 @@ public sealed class CatchupQueue : BackgroundService
         _paths = paths;
         _detection = detection;
         _records = records;
+        _playlists = playlists;
         _logger = logger;
     }
 
@@ -318,7 +322,7 @@ public sealed class CatchupQueue : BackgroundService
 
         // As soon as the file is there: the poster and nfo can still fail, and the
         // full pass, now or later, goes by the channel.
-        _records.Save(new RecordingRecord(target, entry.Name, null, request.Title, request.StartUtc, "catchup"));
+        _records.Save(new RecordingRecord(target, entry.Name, null, request.Title, request.StartUtc, "catchup", entry.Groups));
         job.Set(CatchupState.Finishing);
         var poster = await WritePosterAsync(folder, target, request, length, cancellationToken).ConfigureAwait(false);
         await File.WriteAllBytesAsync(Path.Combine(folder, "movie.nfo"), RecordingFiles.MovieNfo(request.Title!, request.Plot, request.StartUtc, poster), cancellationToken).ConfigureAwait(false);
@@ -357,40 +361,8 @@ public sealed class CatchupQueue : BackgroundService
         });
     }
 
-    private async Task<(PlaylistEntry? Entry, string? Problem)> FindChannelAsync(CatchupRequest request, CancellationToken cancellationToken)
-    {
-        var tuners = _config.GetConfiguration<LiveTvOptions>("livetv").TunerHosts
-            .Where(t => string.Equals(t.Type, "m3u", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(t.Url))
-            .ToList();
-        if (tuners.Count == 0)
-        {
-            return (null, "Jellyfin has no M3U tuner");
-        }
-
-        foreach (var tuner in tuners)
-        {
-            string text;
-            try
-            {
-                text = tuner.Url.StartsWith("http", StringComparison.OrdinalIgnoreCase)
-                    ? await _http.CreateClient(NamedClient.Default).GetStringAsync(new Uri(tuner.Url), cancellationToken).ConfigureAwait(false)
-                    : await File.ReadAllTextAsync(tuner.Url, cancellationToken).ConfigureAwait(false);
-            }
-            catch (Exception ex) when (ex is IOException or HttpRequestException or UnauthorizedAccessException)
-            {
-                _logger.LogWarning("Comseg: could not read the playlist of tuner {Tuner}: {Problem}", tuner.FriendlyName ?? tuner.Id, Url.Replace(ex.Message, "<url>"));
-                continue;
-            }
-
-            var entry = Archive.Find(Archive.ParsePlaylist(text), request.ChannelName, request.ChannelNumber);
-            if (entry is not null)
-            {
-                return (entry, null);
-            }
-        }
-
-        return (null, string.Create(CultureInfo.InvariantCulture, $"no tuner playlist has the channel {request.ChannelName} ({request.ChannelNumber})"));
-    }
+    private Task<(PlaylistEntry? Entry, string? Problem)> FindChannelAsync(CatchupRequest request, CancellationToken cancellationToken)
+        => _playlists.FindAsync(request.ChannelName, request.ChannelNumber, cancellationToken);
 
     private string? DefaultRecordingRoot()
     {

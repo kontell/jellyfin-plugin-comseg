@@ -96,7 +96,7 @@
                         <div class="fieldDescription checkboxDescription">Keep each finished recording's audio fingerprint per channel (about 120 KB an hour, the newest 20 recordings), and while a recording is written, work out from it the breaks it would publish. Those go to the log and the status below only; nothing published changes. Needs the channel noted from the recording's timer.</div>
                     </div>
                     <h3>Channel profiles</h3>
-                    <div class="fieldDescription">Settings for the recordings of particular channels. A recording's channel is noted from its timer when it starts recording; the first profile that lists it applies, and recordings no profile lists run with the settings above.</div>
+                    <div class="fieldDescription">Settings for the recordings of particular channels. A recording's channel, and its groups in the tuner's playlist, are noted from its timer when it starts recording; the first profile that lists the channel or one of its groups applies, and recordings no profile lists run with the settings above.</div>
                     <br />
                     <div id="comsegProfiles"></div>
                     <div class="inputContainer">
@@ -182,6 +182,7 @@
                     return {
                         Name: el.querySelector('.profName').value.trim(),
                         Channels: el.querySelector('.profChannels').value.trim(),
+                        Groups: el.querySelector('.profGroups').value.trim(),
                         IniKeys: el.querySelector('.profKeys').value.trim(),
                         AnalysisHeight: isNaN(height) ? -1 : height,
                         LiveDetection: el.querySelector('.profLive').checked,
@@ -204,6 +205,8 @@
                         + '<div class="inputContainer"><input is="emby-input" type="text" class="profName" label="Name" value="' + escapeHtml(p.Name || '') + '" /></div>'
                         + '<div class="inputContainer"><input is="emby-input" type="text" class="profChannels" label="Channels" value="' + escapeHtml(oneLine(p.Channels)) + '" />'
                         + '<div class="fieldDescription">Channel names as Jellyfin shows them, separated by semicolons. Case and accents are ignored, and * matches any text, as in Sky Sports*.</div></div>'
+                        + '<div class="inputContainer"><input is="emby-input" type="text" class="profGroups" label="Playlist groups" value="' + escapeHtml(oneLine(p.Groups)) + '" />'
+                        + '<div class="fieldDescription">Groups from the M3U tuner\'s playlist (its group-title), separated by semicolons, matched as channel names are. A group-title of Sport;Sky Sports puts a channel in Sport and in Sky Sports. A channel in any of them uses this profile, as does a channel listed above.</div></div>'
                         + '<div class="inputContainer"><input is="emby-input" type="text" class="profKeys" label="Comskip ini keys" value="' + escapeHtml(oneLine(p.IniKeys)) + '" />'
                         + '<div class="fieldDescription">key=value pairs separated by semicolons, laid over the base ini for these channels, such as ticker_tape_percentage=0. The plugin\'s run-mode keys still win; Check Comskip lists any that are left out.</div></div>'
                         + '<div class="inputContainer"><input is="emby-input" type="number" class="profHeight" pattern="[0-9]*" min="0" max="1080" label="Analysis height (empty uses the setting above)" value="' + (p.AnalysisHeight >= 0 ? p.AnalysisHeight : '') + '" /></div>'
@@ -270,7 +273,7 @@
             document.querySelector('#btnRefresh').addEventListener('click', status);
             document.querySelector('#btnAddProfile').addEventListener('click', function () {
                 var list = readProfiles();
-                list.push({ Name: '', Channels: '', IniKeys: '', AnalysisHeight: -1, LiveDetection: true, KeepFrames: false, AudioEvidence: true, PublishAudio: false });
+                list.push({ Name: '', Channels: '', Groups: '', IniKeys: '', AnalysisHeight: -1, LiveDetection: true, KeepFrames: false, AudioEvidence: true, PublishAudio: false });
                 renderProfiles(list);
             });
 
