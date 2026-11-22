@@ -125,6 +125,17 @@ public class PlaylistGroupTests
             Assert.Null(await playlists.GroupsAsync("BBC One", CancellationToken.None));
             Assert.Equal("no tuner playlist has the channel BBC One (1)", (await playlists.FindAsync("BBC One", "1", CancellationToken.None)).Problem);
 
+            // A tuner whose URL cannot be fetched (a scheme HttpClient does not take, a bad path) is passed over, not thrown.
+            var odd = new TunerPlaylists(
+                new FakeConfig(
+                    new TunerHostInfo { Id = "x", Type = "m3u", Url = "httpx://tv.example/playlist.m3u8" },
+                    new TunerHostInfo { Id = "y", Type = "m3u", Url = "http//no-colon" },
+                    new TunerHostInfo { Id = "z", Type = "m3u", Url = "bad\0path" },
+                    new TunerHostInfo { Id = "t1", Type = "m3u", Url = file }),
+                new NoHttp(),
+                NullLogger<TunerPlaylists>.Instance);
+            Assert.Equal(["Sport", "Sky Sports"], (await odd.GroupsAsync("Sky Main Event", CancellationToken.None))!);
+
             var none = new TunerPlaylists(new FakeConfig(new TunerHostInfo { Id = "h", Type = "hdhomerun", Url = "http://hd" }), new NoHttp(), NullLogger<TunerPlaylists>.Instance);
             Assert.Equal("Jellyfin has no M3U tuner", (await none.FindAsync("Sky Main Event", null, CancellationToken.None)).Problem);
         }

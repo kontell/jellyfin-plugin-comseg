@@ -93,12 +93,25 @@ public sealed class TunerPlaylists
             {
                 try
                 {
-                    var text = tuner.Url.StartsWith("http", StringComparison.OrdinalIgnoreCase)
-                        ? await _http.CreateClient(NamedClient.Default).GetStringAsync(new Uri(tuner.Url), cancellationToken).ConfigureAwait(false)
-                        : await File.ReadAllTextAsync(tuner.Url, cancellationToken).ConfigureAwait(false);
+                    string text;
+                    if (!tuner.Url.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+                    {
+                        text = await File.ReadAllTextAsync(tuner.Url, cancellationToken).ConfigureAwait(false);
+                    }
+                    else if (Uri.TryCreate(tuner.Url, UriKind.Absolute, out var uri) && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps))
+                    {
+                        text = await _http.CreateClient(NamedClient.Default).GetStringAsync(uri, cancellationToken).ConfigureAwait(false);
+                    }
+                    else
+                    {
+                        // HttpClient would throw NotSupportedException for a scheme such as httpx.
+                        throw new UriFormatException("the tuner's URL is neither http nor https");
+                    }
+
                     playlists.Add(Archive.ParsePlaylist(text));
                 }
-                catch (Exception ex) when (ex is IOException or HttpRequestException or UnauthorizedAccessException or UriFormatException || (ex is TaskCanceledException && !cancellationToken.IsCancellationRequested))
+                catch (Exception ex) when (ex is IOException or HttpRequestException or UnauthorizedAccessException or UriFormatException or NotSupportedException or ArgumentException
+                    || (ex is TaskCanceledException && !cancellationToken.IsCancellationRequested))
                 {
                     failed = true;
                     _logger.LogWarning("Comseg: could not read the playlist of tuner {Tuner}: {Problem}", tuner.FriendlyName ?? tuner.Id, Url.Replace(ex.Message, "<url>"));
