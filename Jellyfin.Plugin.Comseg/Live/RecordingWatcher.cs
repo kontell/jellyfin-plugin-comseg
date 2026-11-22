@@ -6,6 +6,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.Comseg.Audio;
+using Jellyfin.Plugin.Comseg.Catchup;
 using Jellyfin.Plugin.Comseg.Comskip;
 using Jellyfin.Plugin.Comseg.Configuration;
 using Jellyfin.Plugin.Comseg.Edl;
@@ -68,6 +69,7 @@ public sealed class RecordingWatcher : BackgroundService
     private readonly Workspace _workspace;
     private readonly DetectionRegistry _registry;
     private readonly RecordingRecords _records;
+    private readonly TunerPlaylists _playlists;
     private readonly ProfileSelector _profiles;
     private readonly RecordingPaths _paths;
     private readonly Fingerprinter _fingerprinter;
@@ -95,6 +97,7 @@ public sealed class RecordingWatcher : BackgroundService
     /// <param name="workspace">The workspace.</param>
     /// <param name="registry">The detection registry.</param>
     /// <param name="records">The recording records.</param>
+    /// <param name="playlists">The tuners' playlists, for a channel's groups.</param>
     /// <param name="profiles">The channel profiles.</param>
     /// <param name="paths">The recording paths, for the roots the record sweep checks.</param>
     /// <param name="fingerprinter">The fingerprinter.</param>
@@ -113,6 +116,7 @@ public sealed class RecordingWatcher : BackgroundService
         Workspace workspace,
         DetectionRegistry registry,
         RecordingRecords records,
+        TunerPlaylists playlists,
         ProfileSelector profiles,
         RecordingPaths paths,
         Fingerprinter fingerprinter,
@@ -131,6 +135,7 @@ public sealed class RecordingWatcher : BackgroundService
         _workspace = workspace;
         _registry = registry;
         _records = records;
+        _playlists = playlists;
         _profiles = profiles;
         _paths = paths;
         _fingerprinter = fingerprinter;
@@ -281,7 +286,7 @@ public sealed class RecordingWatcher : BackgroundService
         _recorded.IntersectWith(active);
         foreach (var (path, timer) in timers)
         {
-            RecordChannel(path, timer);
+            await RecordChannelAsync(path, timer, cancellationToken).ConfigureAwait(false);
         }
 
         if (config.EnableLiveDetection)
@@ -446,25 +451,35 @@ public sealed class RecordingWatcher : BackgroundService
     }
 
     /// <summary>
-    /// Writes down the channel of a recording in progress, once: a finished
-    /// recording carries no channel, so this is what its later passes go by.
-    /// A record already there (an admin's, or this recording's from before a
-    /// restart) is kept.
+    /// Writes down the channel of a recording in progress, and its groups in
+    /// the tuner's playlist, once: a finished recording carries no channel, so
+    /// this is what its later passes go by. A record already there (an
+    /// admin's, or this recording's from before a restart) is kept.
     /// </summary>
-    private void RecordChannel(string path, TimerInfoDto timer)
+    private async Task RecordChannelAsync(string path, TimerInfoDto timer, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(timer.ChannelName) || _recorded.Contains(path))
         {
             return;
         }
 
+        if (_records.Get(path) is not null)
+        {
+            _recorded.Add(path);
+            return;
+        }
+
+        // A playlist that cannot be read leaves the groups unknown: profiles then go by the name alone.
+        var name = timer.ChannelName.Trim();
+        var groups = await _playlists.GroupsAsync(name, cancellationToken).ConfigureAwait(false);
         var record = new RecordingRecord(
             path,
-            timer.ChannelName.Trim(),
+            name,
             timer.ChannelId == Guid.Empty ? null : timer.ChannelId.ToString("N", System.Globalization.CultureInfo.InvariantCulture),
             timer.Name,
             timer.StartDate == default ? null : timer.StartDate,
-            "timer");
+            "timer",
+            groups);
         // A write that failed is tried again at the next poll.
         var result = _records.SaveIfMissing(record);
         if (result != SaveResult.Failed)
@@ -474,7 +489,7 @@ public sealed class RecordingWatcher : BackgroundService
 
         if (result == SaveResult.Saved)
         {
-            _logger.LogDebug("Comseg: {Path} is recording from {Channel}", path, record.ChannelName);
+            _logger.LogDebug("Comseg: {Path} is recording from {Channel} (playlist groups: {Groups})", path, record.ChannelName, groups is null ? "unknown" : string.Join("; ", groups));
         }
     }
 

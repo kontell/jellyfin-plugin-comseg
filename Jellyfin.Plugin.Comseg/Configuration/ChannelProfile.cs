@@ -2,9 +2,9 @@ namespace Jellyfin.Plugin.Comseg.Configuration;
 
 /// <summary>
 /// Settings for the recordings of some channels: one channel, or several
-/// that behave alike (a group). The first profile whose channel list matches
-/// a recording's channel applies; a recording that matches none, or whose
-/// channel is not known, runs with the plugin's own settings.
+/// that behave alike. The first profile whose channel list or playlist groups
+/// match a recording's channel applies; a recording that matches none, or
+/// whose channel is not known, runs with the plugin's own settings.
 /// </summary>
 public class ChannelProfile
 {
@@ -17,6 +17,13 @@ public class ChannelProfile
     /// text: "Sky Sports*" matches every channel whose name begins that way.
     /// </summary>
     public string Channels { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the tuner playlist groups it applies to, separated by
+    /// semicolons or lines, matched as channel names are: a channel in any of
+    /// them (its M3U group-title, split at semicolons) uses the profile.
+    /// </summary>
+    public string Groups { get; set; } = string.Empty;
 
     /// <summary>
     /// Gets or sets Comskip ini keys laid over the base ini for these channels,

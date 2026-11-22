@@ -42,6 +42,7 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddSingleton<RecordingWatcher>();
         serviceCollection.AddHostedService(provider => provider.GetRequiredService<RecordingWatcher>());
         serviceCollection.AddSingleton<OnDemandDetection>();
+        serviceCollection.AddSingleton<TunerPlaylists>();
         serviceCollection.AddSingleton<CatchupQueue>();
         serviceCollection.AddHostedService(provider => provider.GetRequiredService<CatchupQueue>());
         serviceCollection.AddSingleton<IMediaSegmentProvider, ComsegSegmentProvider>();

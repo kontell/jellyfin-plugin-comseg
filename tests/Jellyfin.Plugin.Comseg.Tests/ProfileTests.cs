@@ -81,7 +81,7 @@ public class ProfileTests
     public void AProfileWithoutChannelsNeverApplies()
     {
         Assert.Null(ProfileRules.Match(new[] { new ChannelProfile { Name = "empty", Channels = " ; " } }, "ITV 1"));
-        Assert.Contains("empty: no channels, so it never applies", ProfileRules.Check(new[] { new ChannelProfile { Name = "empty" } }));
+        Assert.Contains("empty: no channels or playlist groups, so it never applies", ProfileRules.Check(new[] { new ChannelProfile { Name = "empty" } }));
     }
 
     [Fact]

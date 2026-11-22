@@ -30,7 +30,7 @@ public static class ProfileRules
     /// <returns>The settings.</returns>
     public static RunSettings Resolve(PluginConfiguration config, RecordingRecord? record)
     {
-        var profile = record is null ? null : Match(config.Profiles ?? [], record.ChannelName);
+        var profile = record is null ? null : Match(config.Profiles ?? [], record.ChannelName, record.ChannelGroups);
         if (profile is null)
         {
             return new RunSettings(config, null, record, new Dictionary<string, string>(StringComparer.Ordinal), []);
@@ -47,27 +47,31 @@ public static class ProfileRules
         return new RunSettings(effective, profile, record, keys, problems);
     }
 
-    /// <summary>The first profile that lists the channel.</summary>
+    /// <summary>The first profile that lists the channel, or one of its playlist groups.</summary>
     /// <param name="profiles">The profiles, in order.</param>
     /// <param name="channelName">The channel's name in Jellyfin.</param>
+    /// <param name="channelGroups">The channel's groups in the tuner's playlist, when known.</param>
     /// <returns>The profile, or null.</returns>
-    public static ChannelProfile? Match(IEnumerable<ChannelProfile> profiles, string? channelName)
+    public static ChannelProfile? Match(IEnumerable<ChannelProfile> profiles, string? channelName, IReadOnlyList<string>? channelGroups = null)
     {
         if (string.IsNullOrWhiteSpace(channelName))
         {
             return null;
         }
 
-        return profiles.FirstOrDefault(p => p is not null && Patterns(p.Channels).Any(pattern => Matches(pattern, channelName)));
+        var groups = channelGroups ?? [];
+        return profiles.FirstOrDefault(p => p is not null
+            && (Patterns(p.Channels).Any(pattern => Matches(pattern, channelName))
+                || Patterns(p.Groups).Any(pattern => groups.Any(g => Matches(pattern, g)))));
     }
 
     /// <summary>
-    /// Whether a channel name fits a pattern: case and accents are ignored, so
-    /// "RTÉ One" fits a channel the playlist calls "RTE One", and * stands for
-    /// any text.
+    /// Whether a channel or group name fits a pattern: case and accents are
+    /// ignored, so "RTÉ One" fits a channel the playlist calls "RTE One", and *
+    /// stands for any text.
     /// </summary>
     /// <param name="pattern">The pattern.</param>
-    /// <param name="channelName">The channel's name.</param>
+    /// <param name="channelName">The channel's or group's name.</param>
     /// <returns>True when it fits.</returns>
     public static bool Matches(string pattern, string channelName)
     {
@@ -75,8 +79,8 @@ public static class ProfileRules
         return Regex.IsMatch(Fold(channelName), regex, RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
     }
 
-    /// <summary>The channel patterns of a profile: separated by semicolons or lines, blanks dropped.</summary>
-    /// <param name="channels">The profile's channel list.</param>
+    /// <summary>The channel or group patterns of a profile: separated by semicolons or lines, blanks dropped.</summary>
+    /// <param name="channels">The profile's channel or group list.</param>
     /// <returns>The patterns.</returns>
     public static IReadOnlyList<string> Patterns(string? channels)
         => (channels ?? string.Empty).Split([';', '\n', '\r'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
@@ -129,9 +133,9 @@ public static class ProfileRules
         {
             var profile = profiles[i];
             var name = DisplayName(profile, i);
-            if (Patterns(profile.Channels).Count == 0)
+            if (Patterns(profile.Channels).Count == 0 && Patterns(profile.Groups).Count == 0)
             {
-                problems.Add(name + ": no channels, so it never applies");
+                problems.Add(name + ": no channels or playlist groups, so it never applies");
             }
 
             problems.AddRange(ParseKeys(profile.IniKeys).Problems.Select(p => name + ": " + p));
